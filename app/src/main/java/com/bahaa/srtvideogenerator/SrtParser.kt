@@ -11,7 +11,7 @@ object SrtParser {
     private val TIME = Regex(
         """(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})"""
     )
-    private val TAGS = Regex("<[^>]+>|\\{\\\\[^}]*}")
+    private val TAGS = Regex("<[^>]+>")
 
     fun parse(context: Context, uri: Uri): List<SrtCue> {
         val text = context.contentResolver.openInputStream(uri)?.use {
