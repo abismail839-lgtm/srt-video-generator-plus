@@ -1,4 +1,4 @@
-# SRT Video Generator+ (reconstruction)
+# HU Video Maker (reconstruction of SRT Video Generator)
 
 NEW code written from the APK findings. It is NOT the original app's code and was NOT built or tested
 on a device yet. Installs next to the original (id: com.bahaa.srtvideogenerator.upgraded).

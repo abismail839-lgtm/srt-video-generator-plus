@@ -1,6 +1,9 @@
 package com.bahaa.srtvideogenerator.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,9 +46,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import com.bahaa.srtvideogenerator.AudioSettings
 import com.bahaa.srtvideogenerator.BitmapLoader
 import com.bahaa.srtvideogenerator.MainViewModel
@@ -63,7 +66,6 @@ import kotlin.math.roundToInt
 fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     val s by vm.state.collectAsState()
     val ctx = LocalContext.current
-    LocalView.current.keepScreenOn = s.rendering
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { vm.setImages(it) }
     val srtPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(vm::setSrt) }
@@ -71,6 +73,15 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(vm::setVoice) }
     val musicPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(vm::setMusic) }
     val sfxPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(vm::setSfxFile) }
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { vm.setImageFolder(it) }
+    // Android 13+: ask once for the notification that shows render progress, then start anyway.
+    val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { vm.generateVideo() }
+    val startRender = {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        else vm.generateVideo()
+    }
 
     var previewIndex by remember { mutableStateOf<Int?>(null) }
 
@@ -79,13 +90,16 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { Text("SRT Video Generator+", style = MaterialTheme.typography.headlineSmall) }
+        item { Text("HU Video Maker", style = MaterialTheme.typography.headlineSmall) }
 
         // ---------------- files ----------------
         item {
             Section("1. Files") {
-                FileRow("Images", if (s.images.isEmpty()) null else "${s.images.size} selected (sorted by name)",
+                FileRow("Images", if (s.images.isEmpty()) null else (s.imageSource ?: "${s.images.size} images"),
                     { imagePicker.launch(arrayOf("image/*")) }, null)
+                OutlinedButton(onClick = { folderPicker.launch(null) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Choose a whole folder of images")
+                }
                 FileRow("SRT subtitles", s.srtName, { srtPicker.launch(arrayOf("*/*")) }, if (s.srtUri != null) ({ vm.setSrt(null) }) else null)
                 FileRow("Voice-over (optional)", s.voiceName, { audioPicker.launch(arrayOf("audio/*")) }, if (s.audio.voiceUri != null) ({ vm.setVoice(null) }) else null)
                 FileRow("Word-by-word SRT (optional)", s.wordSrtName, { wordPicker.launch(arrayOf("*/*")) }, if (s.wordSrtUri != null) ({ vm.setWordSrt(null) }) else null)
@@ -97,6 +111,7 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         item {
             Section("2. Video") {
                 Dropdown("Size", s.resolution.label, Resolution.entries, { it.label }) { vm.setResolution(it) }
+                Dropdown("Frame rate (24 renders faster)", "${s.fps} fps", listOf(24, 30), { "$it fps" }) { vm.setFps(it) }
                 Dropdown("Zoom effect", s.zoomMode.label, ZoomMode.entries, { it.label }) { vm.setZoom(it) }
             }
         }
@@ -149,8 +164,11 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         // ---------------- music ----------------
         item {
             Section("4. Voice and background music") {
-                LabeledSlider("Voice volume", "${(s.audio.voiceVolume * 100).roundToInt()}%", s.audio.voiceVolume, 0f..1.5f) {
+                LabeledSlider("Voice volume", "${(s.audio.voiceVolume * 100).roundToInt()}%", s.audio.voiceVolume, 0f..3f) {
                     vm.setAudio(s.audio.copy(voiceVolume = it))
+                }
+                LabeledSwitch("Auto-boost a quiet voice-over", s.audio.voiceBoost) {
+                    vm.setAudio(s.audio.copy(voiceBoost = it))
                 }
                 FileRow("Background music", s.musicName, { musicPicker.launch(arrayOf("audio/*")) }, if (s.audio.musicUri != null) ({ vm.setMusic(null) }) else null)
                 if (s.audio.musicUri != null) {
@@ -179,8 +197,8 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                         vm.setAudio(s.audio.copy(sfxChoice = it))
                     }
                     FileRow("Your own sound file", s.sfxName, { sfxPicker.launch(arrayOf("audio/*")) }, if (s.audio.sfxCustomUri != null) ({ vm.setSfxFile(null) }) else null)
-                    LabeledSlider("Sound volume", "${(s.audio.sfxVolume * 100).roundToInt()}%", s.audio.sfxVolume, 0f..1f) {
-                        vm.setAudio(s.audio.copy(sfxVolume = it))
+                    LabeledSlider("Sound volume", "${(s.audio.sfxVolume * 100).roundToInt()}%", s.audio.sfxVolume, 0f..0.5f) {
+                        vm.setAudio(s.audio.copy(sfxVolume = (it * 100).roundToInt() / 100f))
                     }
                 }
             }
@@ -193,9 +211,9 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                     LinearProgressIndicator(progress = { s.progress }, modifier = Modifier.fillMaxWidth())
                     Text("${(s.progress * 100).roundToInt()}%  ${s.status}")
                     OutlinedButton(onClick = { vm.cancel() }, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
-                    Text("Keep the app open while the video renders.", style = MaterialTheme.typography.bodySmall)
+                    Text("You can leave the app or turn the screen off. Progress shows in the notification.", style = MaterialTheme.typography.bodySmall)
                 } else {
-                    Button(onClick = { vm.generateVideo() }, modifier = Modifier.fillMaxWidth()) { Text("Generate video") }
+                    Button(onClick = { startRender() }, modifier = Modifier.fillMaxWidth()) { Text("Generate video") }
                     if (s.status.isNotEmpty()) Text(s.status)
                     s.resultUri?.let { uri ->
                         OutlinedButton(onClick = {

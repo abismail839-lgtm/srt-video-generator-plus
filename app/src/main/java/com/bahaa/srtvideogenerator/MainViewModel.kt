@@ -4,26 +4,28 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.coroutines.coroutineContext
 
 // ===== NEW CODE =====
 
 data class UiState(
     val images: List<ImageItem> = emptyList(),
+    val imageSource: String? = null,
     val srtUri: Uri? = null, val srtName: String? = null,
     val wordSrtUri: Uri? = null, val wordSrtName: String? = null,
     val voiceName: String? = null, val musicName: String? = null, val sfxName: String? = null,
     val resolution: Resolution = Resolution.HD_LANDSCAPE,
+    val fps: Int = 24,
     val zoomMode: ZoomMode = ZoomMode.IN,
     val showSubtitles: Boolean = true,
     val transitions: TransitionSettings = TransitionSettings(),
@@ -70,12 +72,60 @@ fun loadImageUris(context: Context, uris: List<Uri>): List<ImageItem> =
     uris.map { ImageItem(it, displayName(context, it)) }
         .sortedWith(Comparator { a, b -> naturalCompare(a.name, b.name) })
 
+/** Lists every image directly inside a folder chosen with "Use this folder". */
+fun loadImagesFromFolder(context: Context, tree: Uri): List<ImageItem> {
+    val folderId = DocumentsContract.getTreeDocumentId(tree)
+    val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, folderId)
+    val out = ArrayList<ImageItem>()
+    context.contentResolver.query(
+        children,
+        arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        ),
+        null, null, null
+    )?.use { c ->
+        while (c.moveToNext()) {
+            val mime = c.getString(2) ?: continue
+            if (!mime.startsWith("image/")) continue
+            val uri = DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0))
+            out += ImageItem(uri, c.getString(1) ?: "image")
+        }
+    }
+    return out.sortedWith(Comparator { a, b -> naturalCompare(a.name, b.name) })
+}
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
+    private val store = SettingsStore(app)
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
-    private var job: Job? = null
 
     private val ctx get() = getApplication<Application>()
+
+    init {
+        val saved = store.load()
+        _state.update {
+            it.copy(
+                resolution = saved.resolution, fps = saved.fps, zoomMode = saved.zoomMode,
+                showSubtitles = saved.showSubtitles, transitions = saved.transitions, audio = saved.audio
+            )
+        }
+        // mirror the background renderer's progress into the screen state
+        viewModelScope.launch {
+            RenderController.state.collect { r ->
+                _state.update {
+                    it.copy(rendering = r.rendering, progress = r.progress, status = r.status,
+                        resultUri = r.resultUri, error = r.error)
+                }
+            }
+        }
+    }
+
+    private fun save() {
+        val s = _state.value
+        store.save(SavedSettings(s.resolution, s.fps, s.zoomMode, s.showSubtitles, s.transitions, s.audio))
+    }
 
     private fun persist(uri: Uri) {
         try {
@@ -83,22 +133,53 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } catch (_: Exception) {}
     }
 
+    // ---------------- files ----------------
+
     fun setImages(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         uris.forEach(::persist)
-        _state.update { it.copy(images = loadImageUris(ctx, uris), resultUri = null, error = null) }
+        _state.update {
+            it.copy(images = loadImageUris(ctx, uris), imageSource = "${uris.size} selected (sorted by name)",
+                resultUri = null, error = null)
+        }
     }
+
+    fun setImageFolder(tree: Uri?) {
+        if (tree == null) return
+        persist(tree)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val items = loadImagesFromFolder(ctx, tree)
+                _state.update {
+                    it.copy(
+                        images = items,
+                        imageSource = if (items.isEmpty()) "No images found in that folder"
+                        else "Folder: ${items.size} images (sorted by name)",
+                        resultUri = null, error = null
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = "Could not read folder: ${e.message}") }
+            }
+        }
+    }
+
     fun setSrt(uri: Uri?) { uri?.let(::persist); _state.update { it.copy(srtUri = uri, srtName = uri?.let { u -> displayName(ctx, u) }) } }
+
     fun setWordSrt(uri: Uri?) {
         uri?.let(::persist)
         _state.update {
             it.copy(
                 wordSrtUri = uri, wordSrtName = uri?.let { u -> displayName(ctx, u) },
-                showSubtitles = if (uri != null) false else true // word captions replace full subtitles by default
+                showSubtitles = uri == null // word captions replace full subtitles by default
             )
         }
+        save()
     }
+
     fun setVoice(uri: Uri?) { uri?.let(::persist); _state.update { it.copy(audio = it.audio.copy(voiceUri = uri), voiceName = uri?.let { u -> displayName(ctx, u) }) } }
     fun setMusic(uri: Uri?) { uri?.let(::persist); _state.update { it.copy(audio = it.audio.copy(musicUri = uri), musicName = uri?.let { u -> displayName(ctx, u) }) } }
+
     fun setSfxFile(uri: Uri?) {
         uri?.let(::persist)
         _state.update {
@@ -107,13 +188,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 sfxName = uri?.let { u -> displayName(ctx, u) }
             )
         }
+        save()
     }
 
-    fun setResolution(r: Resolution) = _state.update { it.copy(resolution = r) }
-    fun setZoom(z: ZoomMode) = _state.update { it.copy(zoomMode = z) }
-    fun setShowSubtitles(v: Boolean) = _state.update { it.copy(showSubtitles = v) }
-    fun setTransitions(t: TransitionSettings) = _state.update { it.copy(transitions = t) }
-    fun setAudio(a: AudioSettings) = _state.update { it.copy(audio = a) }
+    // ---------------- settings (remembered) ----------------
+
+    fun setResolution(r: Resolution) { _state.update { it.copy(resolution = r) }; save() }
+    fun setFps(f: Int) { _state.update { it.copy(fps = f) }; save() }
+    fun setZoom(z: ZoomMode) { _state.update { it.copy(zoomMode = z) }; save() }
+    fun setShowSubtitles(v: Boolean) { _state.update { it.copy(showSubtitles = v) }; save() }
+    fun setTransitions(t: TransitionSettings) { _state.update { it.copy(transitions = t) }; save() }
+    fun setAudio(a: AudioSettings) { _state.update { it.copy(audio = a) }; save() }
 
     fun setImageTransition(index: Int, type: TransitionType?) = _state.update { s ->
         s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(transition = type) else im })
@@ -131,6 +216,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         })
     }
 
+    // ---------------- rendering (runs in RenderService) ----------------
+
     // RECONSTRUCTED name (original: SrtVideoGeneratorScreen$generateVideo)
     fun generateVideo() {
         val s = _state.value
@@ -139,28 +226,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(error = "Pick some images first.") }
             return
         }
-        _state.update { it.copy(rendering = true, progress = 0f, status = "Starting…", resultUri = null, error = null) }
-        job = viewModelScope.launch(Dispatchers.Default) {
-            val self = coroutineContext[Job]
-            val req = RenderRequest(
-                images = s.images, srtUri = s.srtUri, wordSrtUri = s.wordSrtUri,
-                resolution = s.resolution, zoomMode = s.zoomMode, showSubtitles = s.showSubtitles,
-                transitions = s.transitions, audio = s.audio
-            )
-            try {
-                val uri = NativeMediaGenerator(ctx).generate(
-                    req,
-                    onProgress = { p, msg -> _state.update { it.copy(progress = p, status = msg) } },
-                    cancelled = { self?.isActive != true }
-                )
-                _state.update { it.copy(rendering = false, progress = 1f, status = "Done – saved to Movies/SRT Video Generator", resultUri = uri) }
-            } catch (_: NativeMediaGenerator.Cancelled) {
-                _state.update { it.copy(rendering = false, status = "Cancelled") }
-            } catch (e: Throwable) {
-                _state.update { it.copy(rendering = false, error = "${e.javaClass.simpleName}: ${e.message}") }
-            }
+        val req = RenderRequest(
+            images = s.images, srtUri = s.srtUri, wordSrtUri = s.wordSrtUri,
+            resolution = s.resolution, fps = s.fps, zoomMode = s.zoomMode, showSubtitles = s.showSubtitles,
+            transitions = s.transitions, audio = s.audio
+        )
+        if (RenderController.begin(req)) {
+            ContextCompat.startForegroundService(ctx, Intent(ctx, RenderService::class.java))
         }
     }
 
-    fun cancel() { job?.cancel() }
+    fun cancel() { RenderController.cancel() }
 }

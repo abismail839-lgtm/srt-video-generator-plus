@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- ink-brown film frame -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#2B2118"
+        android:strokeWidth="4"
+        android:strokeLineJoin="round"
+        android:pathData="M30,34L78,34L78,74L30,74Z" />
+    <!-- film sprocket holes -->
+    <path android:fillColor="#2B2118" android:pathData="M34,38h4v4h-4z" />
+    <path android:fillColor="#2B2118" android:pathData="M34,66h4v4h-4z" />
+    <path android:fillColor="#2B2118" android:pathData="M70,38h4v4h-4z" />
+    <path android:fillColor="#2B2118" android:pathData="M70,66h4v4h-4z" />
+    <!-- amber play button -->
+    <path android:fillColor="#B5651D" android:pathData="M47,45L47,63L63,54Z" />
+</vector>

@@ -30,6 +30,8 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
     private val quad: FloatBuffer = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder())
         .asFloatBuffer().apply { put(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)); position(0) }
 
+    private val uniformCache = HashMap<String, Int>()
+
     private var captionKey: String? = null
     private var captionTex = 0
     private var captionW = 0
@@ -91,7 +93,7 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, to.id)
 
-        fun u(name: String) = GLES20.glGetUniformLocation(transProgram, name)
+        fun u(name: String) = uniformCache.getOrPut(name) { GLES20.glGetUniformLocation(transProgram, name) }
         GLES20.glUniform1i(u("uTexA"), 0)
         GLES20.glUniform1i(u("uTexB"), 1)
         val ca = crop(a)

@@ -4,8 +4,12 @@ import android.content.Context
 import com.bahaa.srtvideogenerator.AudioSettings
 import com.bahaa.srtvideogenerator.SfxChoice
 import com.bahaa.srtvideogenerator.Timeline
+import android.net.Uri
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sqrt
 import kotlin.math.tanh
 
 /**
@@ -26,6 +30,7 @@ class AudioMixer(private val context: Context) {
         a: AudioSettings,
         timeline: Timeline,
         out: File,
+        voiceUs: Long,
         cancelled: () -> Boolean,
         onProgress: (Float) -> Unit
     ): File? {
@@ -37,6 +42,8 @@ class AudioMixer(private val context: Context) {
         var voice: DecodedAudioSource? = null
         var music: DecodedAudioSource? = null
         try {
+            val voiceGain: Float = if (a.voiceUri != null && a.voiceBoost)
+                measureVoiceGain(a.voiceUri, voiceUs, cancelled) else 1f
             voice = a.voiceUri?.let { DecodedAudioSource(context, it, loop = false) }
             music = a.musicUri?.let { DecodedAudioSource(context, it, loop = a.musicLoop) }
 
@@ -51,7 +58,7 @@ class AudioMixer(private val context: Context) {
 
                 voice?.let { v ->
                     v.read(vBuf, n)
-                    for (i in 0 until n * 2) dst[i] += vBuf[i] * a.voiceVolume
+                    for (i in 0 until n * 2) dst[i] += vBuf[i] * a.voiceVolume * voiceGain
                 }
 
                 music?.let { m ->
@@ -88,6 +95,39 @@ class AudioMixer(private val context: Context) {
             music?.close()
         }
         return out
+    }
+
+    /**
+     * Reads the whole voice-over once and works out how much louder it can be made
+     * (target about -17 dBFS speech level, up to +18 dB, short peaks caught by the soft limiter).
+     */
+    private fun measureVoiceGain(uri: Uri, durationUs: Long, cancelled: () -> Boolean): Float {
+        val frames = durationUs * TARGET_RATE / 1_000_000L
+        if (frames <= 0) return 1f
+        var peak = 0f
+        var sumSq = 0.0
+        var counted = 0L
+        DecodedAudioSource(context, uri, loop = false).use { src ->
+            val chunk = 8192
+            val buf = FloatArray(chunk * 2)
+            var done = 0L
+            while (done < frames) {
+                if (cancelled()) throw InterruptedException("cancelled")
+                val n = min(chunk.toLong(), frames - done).toInt()
+                src.read(buf, n)
+                for (i in 0 until n) {
+                    val v = max(abs(buf[2 * i]), abs(buf[2 * i + 1]))
+                    if (v > peak) peak = v
+                    if (v > 0.01f) { sumSq += (v * v).toDouble(); counted++ }
+                }
+                done += n
+            }
+        }
+        if (counted < TARGET_RATE || peak < 0.001f) return 1f
+        val rms = sqrt(sumSq / counted).toFloat()
+        var gain = 0.14f / rms
+        gain = min(gain, 2.5f / peak)
+        return gain.coerceIn(1f, 8f)
     }
 
     private fun planSfx(a: AudioSettings, timeline: Timeline): List<SfxEvent> {

@@ -14,8 +14,19 @@ android {
         applicationId = "com.bahaa.srtvideogenerator.upgraded"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "2.0-reconstructed"
+        versionCode = 2
+        versionName = "2.1"
+    }
+
+    // Fixed signing key kept in the repo, so every build is signed the same way
+    // and a new APK can be installed over the old one without uninstalling.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {

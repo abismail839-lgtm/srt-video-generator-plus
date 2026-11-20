@@ -64,6 +64,8 @@ data class TransitionSettings(
 data class AudioSettings(
     val voiceUri: Uri? = null,
     val voiceVolume: Float = 1f,
+    /** Automatically raises a quiet voice-over to a normal loudness before mixing. */
+    val voiceBoost: Boolean = true,
 
     val musicUri: Uri? = null,
     val musicVolume: Float = 0.10f,
@@ -75,7 +77,7 @@ data class AudioSettings(
     val sfxEnabled: Boolean = true,
     val sfxChoice: SfxChoice = SfxChoice.AUTO,
     val sfxCustomUri: Uri? = null,
-    val sfxVolume: Float = 0.35f
+    val sfxVolume: Float = 0.03f
 )
 
 data class RenderRequest(
@@ -83,7 +85,7 @@ data class RenderRequest(
     val srtUri: Uri?,
     val wordSrtUri: Uri?,
     val resolution: Resolution = Resolution.HD_LANDSCAPE,
-    val fps: Int = 30,
+    val fps: Int = 24,
     val zoomMode: ZoomMode = ZoomMode.IN,
     val zoomStrength: Float = 0.12f,
     val showSubtitles: Boolean = true,

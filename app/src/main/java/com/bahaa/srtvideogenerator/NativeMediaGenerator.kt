@@ -55,7 +55,7 @@ class NativeMediaGenerator(private val context: Context) {
 
             onProgress(0.75f, "Mixing audio…")
             val mixed = try {
-                AudioMixer(context).mix(req.audio, timeline, audioFile, cancelled) {
+                AudioMixer(context).mix(req.audio, timeline, audioFile, voiceUs, cancelled) {
                     onProgress(0.75f + it * 0.2f, "Mixing audio…")
                 }
             } catch (e: InterruptedException) { throw Cancelled() }
