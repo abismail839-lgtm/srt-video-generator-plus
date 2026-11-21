@@ -135,7 +135,8 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
 
     /** Draws an overlay effect (EffectType ordinal 1..9) over the current frame. */
     fun drawOverlay(effect: Int, intensity: Float, timeSec: Float, alpha: Float) {
-        if (effect <= 0 || effect > 9 || alpha <= 0.001f) return
+        // 10 = screen shake and 11 = zoom pulse are done by moving the picture, not by this shader
+        if (effect <= 0 || effect == 10 || effect == 11 || effect > 26 || alpha <= 0.001f) return
         GLES20.glViewport(0, 0, width, height)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
@@ -337,6 +338,23 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
             float hash(vec2 p) {
                 return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
             }
+            float vnoise(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+                           mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+            }
+            float fbm(vec2 p) {
+                float v = 0.0;
+                float a = 0.5;
+                for (int i = 0; i < 4; i++) {
+                    v += a * vnoise(p);
+                    p = p * 2.0 + vec2(1.7, 9.2);
+                    a *= 0.5;
+                }
+                return v;
+            }
             void over(inout vec4 acc, vec3 c, float a) {
                 acc.rgb = acc.rgb * (1.0 - a) + c * a;
                 acc.a = acc.a + a * (1.0 - acc.a);
@@ -466,6 +484,107 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
                     float on = step(0.3, hash(vec2(n, 5.0)));
                     float a = exp(-ph * 9.0) * (0.25 + 0.55 * I) * on;
                     over(acc, vec3(1.0), a);
+                } else if (uEffect == 12) {               // falling leaves
+                    for (int k = 0; k < 2; k++) {
+                        float fk = float(k);
+                        vec2 p = uv * vec2(uAspect, 1.0) * (7.0 + fk * 5.0 + 0.0);
+                        p.y -= t * (0.9 + fk * 0.5);
+                        vec2 id0 = floor(p);
+                        p.x += sin(t * 0.9 + id0.y * 2.1 + fk) * 0.7;
+                        vec2 id = floor(p);
+                        vec2 f = fract(p) - vec2(0.3 + 0.4 * hash(id + 3.0), 0.3 + 0.4 * hash(id + 5.0));
+                        float ang = t * (0.8 + hash(id)) + hash(id + 9.0) * 6.28;
+                        vec2 d = vec2(cos(ang) * f.x - sin(ang) * f.y, sin(ang) * f.x + cos(ang) * f.y);
+                        float present = step(1.0 - (0.10 + 0.28 * I), hash(id));
+                        float leaf = 1.0 - smoothstep(0.08, 0.14, length(d * vec2(1.0, 2.6)));
+                        float h = hash(id + 1.7);
+                        vec3 c = h < 0.33 ? vec3(0.78, 0.35, 0.08) : (h < 0.66 ? vec3(0.85, 0.62, 0.12) : vec3(0.55, 0.22, 0.06));
+                        over(acc, c, present * leaf * 0.95);
+                    }
+                } else if (uEffect == 13) {               // lightning flashes
+                    float period = 3.2;
+                    float n = floor(t / period);
+                    float ph = fract(t / period) * period;
+                    float on = step(0.35, hash(vec2(n, 21.0)));
+                    float a = exp(-ph * 11.0) + 0.8 * step(0.22, ph) * exp(-(ph - 0.22) * 13.0);
+                    over(acc, vec3(0.86, 0.9, 1.0), clamp(a * on * (0.3 + 0.6 * I), 0.0, 1.0));
+                } else if (uEffect == 14) {               // fog / mist
+                    float f = fbm(uv * vec2(uAspect * 2.0, 1.6) + vec2(t * 0.06, t * 0.02));
+                    float a = smoothstep(0.25, 0.85, f) * (0.25 + 0.6 * I) * (0.55 + 0.7 * uv.y);
+                    over(acc, vec3(0.86, 0.88, 0.9), clamp(a, 0.0, 0.9));
+                } else if (uEffect == 15) {               // light rays
+                    vec2 d = (uv - vec2(0.12, -0.12)) * vec2(uAspect, 1.0);
+                    float ang = atan(d.y, d.x);
+                    float rays = pow(0.5 + 0.5 * sin(ang * 14.0 + t * 0.35 + sin(ang * 5.0 + t * 0.2) * 2.0), 3.0);
+                    float a = rays * (1.0 - smoothstep(0.2, 1.5, length(d))) * (0.15 + 0.4 * I);
+                    over(acc, vec3(1.0, 0.93, 0.7), a);
+                } else if (uEffect == 16) {               // film burn
+                    float x = fract(t * 0.16) * 1.8 - 0.4;
+                    float gx = (uv.x - x) * 2.6;
+                    float g = exp(-gx * gx);
+                    float flick = 0.7 + 0.3 * sin(t * 21.0) * sin(t * 13.0);
+                    vec3 c = mix(vec3(1.0, 0.25, 0.02), vec3(1.0, 0.8, 0.2), uv.y);
+                    over(acc, c, g * flick * (0.25 + 0.5 * I));
+                } else if (uEffect == 17) {               // camera REC frame
+                    float cx = min(uv.x, 1.0 - uv.x) * uAspect - 0.05;
+                    float cy = min(uv.y, 1.0 - uv.y) - 0.05;
+                    float br = 0.0;
+                    if (abs(cy) < 0.0025 && cx >= 0.0 && cx < 0.07) br = 1.0;
+                    if (abs(cx) < 0.0025 && cy >= 0.0 && cy < 0.07) br = 1.0;
+                    over(acc, vec3(1.0), br * 0.85);
+                    float d = length(vec2(uv.x * uAspect, uv.y) - vec2(0.13, 0.12));
+                    float blink = step(0.5, fract(t * 0.8));
+                    over(acc, vec3(0.95, 0.05, 0.05), blink * (1.0 - smoothstep(0.016, 0.02, d)));
+                } else if (uEffect == 18) {               // falling ash
+                    float dn = 0.10 + 0.30 * I;
+                    float a = particles(uv, 20.0, 0.8, -1.0, 0.13, dn, 0.8);
+                    a += particles(uv + 0.37, 34.0, 1.1, -1.0, 0.11, dn, 0.6) * 0.8;
+                    over(acc, vec3(0.72, 0.70, 0.68), clamp(a, 0.0, 1.0) * 0.8);
+                } else if (uEffect == 19) {               // fireflies
+                    float dn = 0.04 + 0.12 * I;
+                    float a = particles(uv, 8.0, 0.25, 1.0, 0.42, dn, 1.4);
+                    a += particles(uv + 0.5, 13.0, 0.35, 1.0, 0.36, dn, 1.1);
+                    float pulse = 0.45 + 0.55 * sin(t * 1.6 + uv.x * 5.0 + uv.y * 3.0);
+                    over(acc, vec3(0.85, 1.0, 0.4), clamp(a, 0.0, 1.0) * pulse);
+                } else if (uEffect == 20) {               // sun glare
+                    vec2 d = (uv - vec2(0.9, 0.1)) * vec2(uAspect, 1.0);
+                    float a = exp(-length(d) * 2.8) * (0.3 + 0.5 * I) * (0.92 + 0.08 * sin(t * 1.2));
+                    a += exp(-abs(uv.y - 0.1) * 25.0) * exp(-abs(uv.x - 0.9) * 1.5) * 0.35 * I;
+                    over(acc, vec3(1.0, 0.95, 0.8), clamp(a, 0.0, 0.95));
+                } else if (uEffect == 21) {               // cracked glass corners
+                    for (int k = 0; k < 2; k++) {
+                        vec2 d = (k == 0) ? vec2(uv.x * uAspect, uv.y) : vec2((1.0 - uv.x) * uAspect, 1.0 - uv.y);
+                        float r = length(d);
+                        float ang = atan(d.y, d.x) / 1.5708;
+                        float kk = ang * 7.0 + sin(r * 32.0) * 0.18 + (k == 0 ? 0.0 : 0.4);
+                        float line = 1.0 - smoothstep(0.0, 0.05, abs(fract(kk) - 0.5) * (0.4 + r * 3.0));
+                        float fade = 1.0 - smoothstep(0.15, 0.85, r);
+                        float ring = 1.0 - smoothstep(0.0, 0.02, abs(fract(r * 7.0 + hash(vec2(floor(kk), 3.0)) * 0.5) - 0.5) * 0.4);
+                        over(acc, vec3(0.95), clamp(line * fade * 0.8 + ring * fade * 0.12, 0.0, 1.0) * (0.4 + 0.6 * I));
+                    }
+                } else if (uEffect == 22) {               // night blue tint
+                    over(acc, vec3(0.03, 0.07, 0.26), 0.22 + 0.4 * I);
+                    float d = length((uv - 0.5) * vec2(uAspect * 0.7, 1.0));
+                    over(acc, vec3(0.0, 0.0, 0.05), smoothstep(0.35, 0.9, d) * 0.4 * I);
+                } else if (uEffect == 23) {               // sepia old photo
+                    over(acc, vec3(0.46, 0.30, 0.10), 0.18 + 0.4 * I);
+                    float g = hash(uv * vec2(uAspect * 300.0, 300.0) + floor(t * 12.0)) - 0.5;
+                    over(acc, g > 0.0 ? vec3(1.0) : vec3(0.0), abs(g) * 0.12 * I);
+                    float d = length((uv - 0.5) * vec2(uAspect * 0.8, 1.0));
+                    over(acc, vec3(0.1, 0.05, 0.0), smoothstep(0.4, 0.95, d) * 0.5 * I);
+                } else if (uEffect == 24) {               // drifting smoke
+                    float f = fbm(vec2(uv.x * uAspect * 2.2, uv.y * 2.0 + t * 0.15) + vec2(t * 0.05, 0.0));
+                    float a = smoothstep(0.38, 0.85, f) * (0.3 + 0.55 * I) * (0.4 + 0.8 * uv.y);
+                    over(acc, vec3(0.34, 0.33, 0.32), clamp(a, 0.0, 0.9));
+                } else if (uEffect == 25) {               // candlelight flicker
+                    float flick = 0.55 + 0.45 * sin(t * 13.0) * sin(t * 7.3 + 1.0) * sin(t * 3.1);
+                    float d = length((uv - 0.5) * vec2(uAspect * 0.8, 1.0));
+                    over(acc, vec3(0.0), smoothstep(0.22 + 0.06 * flick, 0.85, d) * (0.45 + 0.4 * I));
+                    over(acc, vec3(1.0, 0.55, 0.15), (0.06 + 0.12 * I) * (0.5 + 0.5 * flick));
+                } else if (uEffect == 26) {               // cinema black bars
+                    float h = 0.08 + 0.07 * I;
+                    float a = max(step(uv.y, h), step(1.0 - h, uv.y));
+                    over(acc, vec3(0.0), a);
                 }
                 gl_FragColor = acc * uAlpha;
             }

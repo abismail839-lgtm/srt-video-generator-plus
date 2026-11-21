@@ -3,7 +3,10 @@ package com.bahaa.srtvideogenerator
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
@@ -32,6 +35,8 @@ data class UiState(
     val audio: AudioSettings = AudioSettings(),
     val caption: CaptionSettings = CaptionSettings(),
     val enhance: EnhanceSettings = EnhanceSettings(),
+    /** Index of the image whose voice-over part is playing, or null. */
+    val playingScene: Int? = null,
     val rendering: Boolean = false,
     val progress: Float = 0f,
     val status: String = "",
@@ -207,6 +212,68 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setImageSfx(index: Int, sfx: SfxChoice?) = _state.update { s ->
         s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(sfx = sfx) else im })
+    }
+
+    fun grantRead(uri: Uri) = persist(uri)
+
+    fun setImageAmbience(index: Int, amb: AmbienceSettings) = _state.update { s ->
+        s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(ambience = amb) else im })
+    }
+
+    fun applyAmbienceToAll(amb: AmbienceSettings) = _state.update { s ->
+        s.copy(images = s.images.map { it.copy(ambience = amb) })
+    }
+
+    // ---------------- listen to one scene's voice-over ----------------
+
+    private var player: MediaPlayer? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private val stopper = Runnable { stopScene() }
+
+    fun stopScene() {
+        handler.removeCallbacks(stopper)
+        try { player?.release() } catch (_: Exception) {}
+        player = null
+        _state.update { it.copy(playingScene = null) }
+    }
+
+    /** Plays only the part of the voice-over that belongs to image [index] (same timing as the video). */
+    fun playScene(index: Int) {
+        if (_state.value.playingScene == index) { stopScene(); return }
+        stopScene()
+        val s = _state.value
+        val voice = s.audio.voiceUri
+        if (voice == null || s.srtUri == null) {
+            _state.update { it.copy(error = "Add the voice-over and the SRT first, then you can listen to a scene.") }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val cues = SrtParser.parse(ctx, s.srtUri)
+                val tl = TimelinePlanner.plan(s.images.size, cues, emptyList(), TransitionSettings(enabled = false), 0L, 3000)
+                val sc = tl.scenes.getOrNull(index) ?: return@launch
+                val startMs = sc.startUs / 1000
+                val lenMs = (sc.endUs - sc.startUs) / 1000
+                val mp = MediaPlayer()
+                mp.setDataSource(ctx, voice)
+                mp.prepare()
+                mp.seekTo(startMs.toInt())
+                mp.setOnCompletionListener { handler.post { stopScene() } }
+                mp.start()
+                handler.post {
+                    player = mp
+                    _state.update { it.copy(playingScene = index, error = null) }
+                    handler.postDelayed(stopper, lenMs.coerceAtLeast(300L))
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = "Could not play that part: ${e.message}") }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        try { player?.release() } catch (_: Exception) {}
+        super.onCleared()
     }
 
     fun setImageEffect(index: Int, effect: EffectSettings) = _state.update { s ->

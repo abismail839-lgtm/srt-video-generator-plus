@@ -1,6 +1,8 @@
 package com.bahaa.srtvideogenerator.audio
 
 import android.content.Context
+import com.bahaa.srtvideogenerator.AmbienceSettings
+import com.bahaa.srtvideogenerator.AmbienceType
 import com.bahaa.srtvideogenerator.AudioSettings
 import com.bahaa.srtvideogenerator.SfxChoice
 import com.bahaa.srtvideogenerator.Timeline
@@ -19,7 +21,12 @@ import kotlin.math.tanh
  */
 class AudioMixer(private val context: Context) {
 
+    private val AMB_FADE_FRAMES = (0.4 * TARGET_RATE).toLong()
+
     private class SfxEvent(val startFrame: Long, val clip: FloatArray, val gain: Float)
+
+    /** A looping scene sound between [startFrame] and [endFrame], faded at both ends. */
+    private class AmbEvent(val startFrame: Long, val endFrame: Long, val clip: FloatArray, val gain: Float)
 
     fun hasAnyAudio(a: AudioSettings, timeline: Timeline): Boolean =
         a.voiceUri != null || a.musicUri != null ||
@@ -32,13 +39,15 @@ class AudioMixer(private val context: Context) {
         out: File,
         voiceUs: Long,
         perImageSfx: List<SfxChoice?>,
+        ambience: List<AmbienceSettings>,
         cancelled: () -> Boolean,
         onProgress: (Float) -> Unit
     ): File? {
-        if (!hasAnyAudio(a, timeline)) return null
+        if (!hasAnyAudio(a, timeline) && ambience.none { it.type != AmbienceType.NONE }) return null
 
         val totalFrames = timeline.totalUs * TARGET_RATE / 1_000_000L
         val events = if (a.sfxEnabled) planSfx(a, timeline, perImageSfx) else emptyList()
+        val ambEvents = planAmbience(timeline, ambience, totalFrames)
 
         var voice: DecodedAudioSource? = null
         var music: DecodedAudioSource? = null
@@ -86,6 +95,23 @@ class AudioMixer(private val context: Context) {
                         val di = ((pos - start) * 2).toInt()
                         dst[di] += ev.clip[ci] * ev.gain
                         dst[di + 1] += ev.clip[ci + 1] * ev.gain
+                    }
+                }
+
+                for (ev in ambEvents) {
+                    if (ev.startFrame >= end || ev.endFrame <= start) continue
+                    val from = maxOf(start, ev.startFrame)
+                    val to = minOf(end, ev.endFrame)
+                    val clipFrames = (ev.clip.size / 2).toLong()
+                    val fade = minOf(AMB_FADE_FRAMES, (ev.endFrame - ev.startFrame) / 2).coerceAtLeast(1)
+                    for (pos in from until to) {
+                        val ci = (((pos - ev.startFrame) % clipFrames) * 2).toInt()
+                        val di = ((pos - start) * 2).toInt()
+                        val g = ev.gain *
+                            minOf(1f, (pos - ev.startFrame) / fade.toFloat()) *
+                            minOf(1f, (ev.endFrame - pos) / fade.toFloat())
+                        dst[di] += ev.clip[ci] * g
+                        dst[di + 1] += ev.clip[ci + 1] * g
                     }
                 }
 
@@ -150,6 +176,28 @@ class AudioMixer(private val context: Context) {
             events += SfxEvent(startFrame, clip, a.sfxVolume)
         }
         return events
+    }
+
+    private fun planAmbience(timeline: Timeline, ambience: List<AmbienceSettings>, totalFrames: Long): List<AmbEvent> {
+        val builtIn = HashMap<AmbienceType, FloatArray>()
+        val customCache = HashMap<Uri, FloatArray>()
+        val out = ArrayList<AmbEvent>()
+        for ((i, amb) in ambience.withIndex()) {
+            if (amb.type == AmbienceType.NONE || i >= timeline.scenes.size) continue
+            val clip: FloatArray = if (amb.type == AmbienceType.CUSTOM) {
+                val uri = amb.customUri ?: continue
+                customCache.getOrPut(uri) { DecodedAudioSource.decodeAll(context, uri, 30) }
+            } else builtIn.getOrPut(amb.type) { AmbienceSynth.generate(amb.type) }
+            if (clip.size < 4) continue
+            val scene = timeline.scenes[i]
+            val startUs = timeline.boundaries.getOrNull(i)?.startUs ?: scene.startUs
+            val endUs = amb.onlyFirstSec?.let { scene.startUs + (it * 1_000_000L).toLong() }
+                ?: (timeline.boundaries.getOrNull(i + 1)?.endUs ?: scene.endUs)
+            val sf = (startUs.coerceAtLeast(0L) * TARGET_RATE / 1_000_000L)
+            val ef = minOf(endUs * TARGET_RATE / 1_000_000L, totalFrames)
+            if (ef > sf) out += AmbEvent(sf, ef, clip, amb.volume)
+        }
+        return out
     }
 
     private fun softClip(x: Float): Float {

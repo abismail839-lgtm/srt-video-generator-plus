@@ -75,7 +75,22 @@ enum class EffectType(val label: String) {
     GLOW_EDGE("Soft white glow edge"),
     FLASH("Flash pulses"),
     SHAKE("Screen shake"),
-    ZOOM_PULSE("Zoom pulse")
+    ZOOM_PULSE("Zoom pulse"),
+    LEAVES("Falling leaves"),
+    LIGHTNING("Lightning flashes"),
+    FOG("Fog / mist"),
+    LIGHT_RAYS("Light rays"),
+    FILM_BURN("Film burn (orange flare)"),
+    REC_DOT("Camera REC frame"),
+    ASH("Falling ash"),
+    FIREFLIES("Fireflies"),
+    SUN_GLARE("Sun glare"),
+    CRACKED_EDGE("Cracked glass corners"),
+    NIGHT_TINT("Night blue tint"),
+    SEPIA("Sepia old photo"),
+    SMOKE("Drifting smoke"),
+    CANDLE("Candlelight flicker"),
+    LETTERBOX("Cinema black bars")
 }
 
 /**
@@ -89,6 +104,30 @@ data class EffectSettings(
     val onlyFirstSec: Float? = null
 )
 
+/** Sound that plays under one scene (not a transition sound). */
+enum class AmbienceType(val label: String) {
+    NONE("None"),
+    RAIN("Rain"),
+    STORM("Storm (rain, wind, thunder)"),
+    FIRE("Fire burning"),
+    MIC_CRACKLE("Microphone crackle"),
+    HOOVES("Horse hooves galloping"),
+    WIND("Wind"),
+    CUSTOM("My own sound file")
+}
+
+/**
+ * [onlyFirstSec] == null: plays for the whole image; otherwise stops (with a fade) after that many seconds.
+ * [customUri] is only used when [type] is CUSTOM.
+ */
+data class AmbienceSettings(
+    val type: AmbienceType = AmbienceType.NONE,
+    val volume: Float = 0.25f,
+    val onlyFirstSec: Float? = null,
+    val customUri: Uri? = null,
+    val customName: String? = null
+)
+
 data class ImageItem(
     val uri: Uri,
     val name: String,
@@ -96,7 +135,8 @@ data class ImageItem(
     val transition: TransitionType? = null,
     /** null = use the default transition sound. NONE = silent for this image's scene change. */
     val sfx: SfxChoice? = null,
-    val effect: EffectSettings = EffectSettings()
+    val effect: EffectSettings = EffectSettings(),
+    val ambience: AmbienceSettings = AmbienceSettings()
 )
 
 data class TransitionSettings(

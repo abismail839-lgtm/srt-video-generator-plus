@@ -51,7 +51,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.bahaa.srtvideogenerator.AmbienceSettings
+import com.bahaa.srtvideogenerator.AmbienceType
 import com.bahaa.srtvideogenerator.AudioSettings
+import com.bahaa.srtvideogenerator.displayName
 import com.bahaa.srtvideogenerator.BitmapLoader
 import com.bahaa.srtvideogenerator.CaptionPosition
 import com.bahaa.srtvideogenerator.CaptionPreset
@@ -92,6 +95,7 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
 
     var previewIndex by remember { mutableStateOf<Int?>(null) }
     var effectIndex by remember { mutableStateOf<Int?>(null) }
+    var ambienceIndex by remember { mutableStateOf<Int?>(null) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().statusBarsPadding(),
@@ -178,6 +182,14 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                                     Text(if (img.effect.type == EffectType.NONE) "Add effect" else "Effect: ${img.effect.type.label}", maxLines = 1)
                                 }
                                 if (i > 0 && s.transitions.enabled) TextButton(onClick = { previewIndex = i }) { Text("Preview") }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { ambienceIndex = i }) {
+                                    Text(if (img.ambience.type == AmbienceType.NONE) "Add scene sound" else "Scene sound: ${img.ambience.type.label}", maxLines = 1)
+                                }
+                                TextButton(onClick = { vm.playScene(i) }) {
+                                    Text(if (s.playingScene == i) "■ Stop" else "▶ Voice")
+                                }
                             }
                         }
                     }
@@ -289,6 +301,57 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     effectIndex?.let { i ->
         EffectDialog(vm, i) { effectIndex = null }
     }
+    ambienceIndex?.let { i ->
+        AmbienceDialog(vm, i) { ambienceIndex = null }
+    }
+}
+
+@Composable
+private fun AmbienceDialog(vm: MainViewModel, index: Int, onClose: () -> Unit) {
+    val s by vm.state.collectAsState()
+    val ctx = LocalContext.current
+    if (index !in s.images.indices) { onClose(); return }
+    var a by remember { mutableStateOf(s.images[index].ambience) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            vm.grantRead(uri)
+            a = a.copy(type = AmbienceType.CUSTOM, customUri = uri, customName = displayName(ctx, uri))
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Scene sound for image ${index + 1}") },
+        confirmButton = { TextButton(onClick = { vm.setImageAmbience(index, a); onClose() }) { Text("Apply") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { vm.applyAmbienceToAll(a); onClose() }) { Text("Apply to all") }
+                TextButton(onClick = onClose) { Text("Cancel") }
+            }
+        },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Plays under this picture. It is separate from the transition sound.", style = MaterialTheme.typography.bodySmall)
+                Dropdown("Sound", a.type.label,
+                    AmbienceType.entries.filter { it != AmbienceType.CUSTOM || a.customUri != null }, { it.label }) { a = a.copy(type = it) }
+                OutlinedButton(onClick = { picker.launch(arrayOf("audio/*")) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(a.customName?.let { "Own file: $it" } ?: "Choose my own sound file", maxLines = 1)
+                }
+                if (a.type != AmbienceType.NONE) {
+                    LabeledSlider("Volume", "${(a.volume * 100).roundToInt()}%", a.volume, 0f..1f) {
+                        a = a.copy(volume = (it * 100).roundToInt() / 100f)
+                    }
+                    LabeledSwitch("Only at the start of the image", a.onlyFirstSec != null) {
+                        a = a.copy(onlyFirstSec = if (it) 3f else null)
+                    }
+                    a.onlyFirstSec?.let { sec ->
+                        LabeledSlider("Stays for", "%.1f s".format(sec), sec, 1f..10f) {
+                            a = a.copy(onlyFirstSec = (it * 2).roundToInt() / 2f)
+                        }
+                    }
+                }
+            }
+        }
+    )
 }
 
 @Composable
