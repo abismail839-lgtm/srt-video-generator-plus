@@ -107,10 +107,10 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         // ---------------- files ----------------
         item {
             Section("1. Files") {
-                FileRow("Images", if (s.images.isEmpty()) null else (s.imageSource ?: "${s.images.size} images"),
-                    { imagePicker.launch(arrayOf("image/*")) }, null)
+                FileRow("Images and video clips", if (s.images.isEmpty()) null else (s.imageSource ?: "${s.images.size} images"),
+                    { imagePicker.launch(arrayOf("image/*", "video/*")) }, null)
                 OutlinedButton(onClick = { folderPicker.launch(null) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Choose a whole folder of images")
+                    Text("Choose a whole folder (images and clips)")
                 }
                 FileRow("SRT subtitles", s.srtName, { srtPicker.launch(arrayOf("*/*")) }, if (s.srtUri != null) ({ vm.setSrt(null) }) else null)
                 FileRow("Voice-over (optional)", s.voiceName, { audioPicker.launch(arrayOf("audio/*")) }, if (s.audio.voiceUri != null) ({ vm.setVoice(null) }) else null)
@@ -161,7 +161,7 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                     Row(Modifier.padding(10.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Thumb(img.uri)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("${i + 1}. ${img.name}", maxLines = 1, style = MaterialTheme.typography.bodyMedium)
+                            Text("${i + 1}. ${if (img.isVideo) "🎬 " else ""}${img.name}", maxLines = 1, style = MaterialTheme.typography.bodyMedium)
                             if (i == 0) {
                                 Text("Opening image (no transition or sound)", style = MaterialTheme.typography.bodySmall)
                             } else {

@@ -71,6 +71,13 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
         return GlTexture(ids[0], bitmap.width, bitmap.height)
     }
 
+    /** Puts a new picture into an existing texture (used for the frames of animated clips). */
+    fun replaceTexture(old: GlTexture, bitmap: Bitmap): GlTexture {
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, old.id)
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+        return GlTexture(old.id, bitmap.width, bitmap.height)
+    }
+
     fun deleteTexture(t: GlTexture) {
         GLES20.glDeleteTextures(1, intArrayOf(t.id), 0)
     }

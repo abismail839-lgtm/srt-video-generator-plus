@@ -105,6 +105,9 @@ class NativeMediaGenerator(private val context: Context) {
         var egl: EglCore? = null
         var renderer: SurfaceRenderer? = null
         val textures = HashMap<Int, GlTexture>()
+        val clips = HashMap<Int, VideoClip>()
+        val clipKey = HashMap<Int, Long>()
+        val frameUs = 1_000_000L / fps
         try {
             val e0 = EglCore(inputSurface)
             egl = e0
@@ -120,6 +123,19 @@ class NativeMediaGenerator(private val context: Context) {
                 try { r.createTexture(bmp) } finally { bmp.recycle() }
             }
 
+            // Animated clips: fetch the right frame for this moment and put it into the scene's texture.
+            fun updateVideo(i: Int, t: Long) {
+                if (!req.images[i].isVideo) return
+                val clip = clips.getOrPut(i) { VideoClip(context, req.images[i].uri, max(w, h)) }
+                val local = (t - timeline.scenes[i].startUs).coerceAtLeast(0L)
+                val shown = minOf(local, (clip.durationUs - 1L).coerceAtLeast(0L)) // freeze on the last frame
+                val key = shown / frameUs
+                if (clipKey[i] == key) return
+                val bmp = clip.frame(shown) ?: return
+                try { textures[i] = r.replaceTexture(tex(i), bmp) } finally { bmp.recycle() }
+                clipKey[i] = key
+            }
+
             val totalFrames = ((timeline.totalUs * fps + 999_999L) / 1_000_000L).toInt().coerceAtLeast(1)
             for (f in 0 until totalFrames) {
                 if (cancelled()) throw Cancelled()
@@ -133,6 +149,8 @@ class NativeMediaGenerator(private val context: Context) {
                     val from = b.sceneIndex - 1
                     val to = b.sceneIndex
                     keepLow = from
+                    updateVideo(from, t)
+                    updateVideo(to, t)
                     val ma = motion(req, timeline, from, t)
                     val mb = motion(req, timeline, to, t)
                     r.draw(
@@ -144,6 +162,7 @@ class NativeMediaGenerator(private val context: Context) {
                 } else {
                     val s = timeline.sceneAt(t)
                     keepLow = s
+                    updateVideo(s, t)
                     val m = motion(req, timeline, s, t)
                     r.draw(null, tex(s), 1f, 0, 1f, m[0], timeSec, 0f, 0f, m[1], m[2])
                     drawSceneOverlay(r, req, timeline, s, t, 1f)
@@ -152,7 +171,10 @@ class NativeMediaGenerator(private val context: Context) {
                 val iter = textures.entries.iterator()
                 while (iter.hasNext()) {
                     val e = iter.next()
-                    if (e.key < keepLow) { r.deleteTexture(e.value); iter.remove() }
+                    if (e.key < keepLow) {
+                        r.deleteTexture(e.value); iter.remove()
+                        clips.remove(e.key)?.close(); clipKey.remove(e.key)
+                    }
                 }
 
                 val word = wordCues.activeAt(t)
@@ -167,6 +189,7 @@ class NativeMediaGenerator(private val context: Context) {
             encoder.signalEndOfInputStream()
             drain.drain(true)
         } finally {
+            clips.values.forEach { it.close() }
             try { renderer?.release() } catch (_: Exception) {}
             egl?.release()
             try { encoder.stop() } catch (_: Exception) {}
@@ -218,6 +241,7 @@ class NativeMediaGenerator(private val context: Context) {
     }
 
     private fun zoomScale(req: RenderRequest, tl: Timeline, scene: Int, t: Long): Float {
+        if (req.images.getOrNull(scene)?.isVideo == true) return 1f // clips already move
         val p = tl.sceneProgress(scene, t)
         val s = req.zoomStrength
         return when (req.zoomMode) {
@@ -346,8 +370,34 @@ class NativeMediaGenerator(private val context: Context) {
     }
 }
 
+/** Frames of an animated clip, fetched one at a time (sound is ignored). */
+class VideoClip(context: Context, uri: Uri, private val maxSide: Int) {
+    private val retriever = MediaMetadataRetriever().apply { setDataSource(context, uri) }
+    val durationUs: Long = (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+        ?.toLongOrNull() ?: 0L) * 1000L
+
+    fun frame(timeUs: Long): Bitmap? {
+        val raw = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST) ?: return null
+        val big = max(raw.width, raw.height)
+        if (big <= maxSide) return raw
+        val k = maxSide.toFloat() / big
+        val scaled = Bitmap.createScaledBitmap(raw, (raw.width * k).toInt().coerceAtLeast(1), (raw.height * k).toInt().coerceAtLeast(1), true)
+        if (scaled !== raw) raw.recycle()
+        return scaled
+    }
+
+    fun close() { try { retriever.release() } catch (_: Exception) {} }
+}
+
 object BitmapLoader {
+    fun isVideo(context: Context, uri: Uri): Boolean =
+        try { context.contentResolver.getType(uri)?.startsWith("video/") == true } catch (_: Exception) { false }
+
     fun decode(context: Context, uri: Uri, maxSide: Int): Bitmap {
+        if (isVideo(context, uri)) {
+            val clip = VideoClip(context, uri, maxSide)
+            try { return clip.frame(0L) ?: error("Cannot read the clip") } finally { clip.close() }
+        }
         val resolver = context.contentResolver
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         resolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it, null, bounds) }

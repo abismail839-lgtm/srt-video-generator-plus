@@ -76,7 +76,7 @@ private fun naturalCompare(a: String, b: String): Int {
 
 /** RECONSTRUCTED name (original: MainActivityKt.loadImageUris). Sorts naturally by file name. */
 fun loadImageUris(context: Context, uris: List<Uri>): List<ImageItem> =
-    uris.map { ImageItem(it, displayName(context, it)) }
+    uris.map { ImageItem(it, displayName(context, it), isVideo = BitmapLoader.isVideo(context, it)) }
         .sortedWith(Comparator { a, b -> naturalCompare(a.name, b.name) })
 
 /** Lists every image directly inside a folder chosen with "Use this folder". */
@@ -95,9 +95,9 @@ fun loadImagesFromFolder(context: Context, tree: Uri): List<ImageItem> {
     )?.use { c ->
         while (c.moveToNext()) {
             val mime = c.getString(2) ?: continue
-            if (!mime.startsWith("image/")) continue
+            if (!mime.startsWith("image/") && !mime.startsWith("video/")) continue
             val uri = DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0))
-            out += ImageItem(uri, c.getString(1) ?: "image")
+            out += ImageItem(uri, c.getString(1) ?: "image", isVideo = mime.startsWith("video/"))
         }
     }
     return out.sortedWith(Comparator { a, b -> naturalCompare(a.name, b.name) })

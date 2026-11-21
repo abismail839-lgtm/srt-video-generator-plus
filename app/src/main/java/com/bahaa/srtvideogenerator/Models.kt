@@ -136,7 +136,9 @@ data class ImageItem(
     /** null = use the default transition sound. NONE = silent for this image's scene change. */
     val sfx: SfxChoice? = null,
     val effect: EffectSettings = EffectSettings(),
-    val ambience: AmbienceSettings = AmbienceSettings()
+    val ambience: AmbienceSettings = AmbienceSettings(),
+    /** An animated clip instead of a still picture (its own sound is not used). */
+    val isVideo: Boolean = false
 )
 
 data class TransitionSettings(

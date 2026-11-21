@@ -30,3 +30,6 @@ If the build fails, copy the red error lines from the Actions log and send them 
 - Each image has a ▶ Voice button that plays just that scene's part of the voice-over.
 - Scene sounds per image (or all images): rain, storm, fire, microphone crackle, horse hooves, wind, or your own file; volume and "only at the start" timer.
 - 15 more overlay effects: falling leaves, lightning, fog, light rays, film burn, camera REC frame, ash, fireflies, sun glare, cracked glass corners, night tint, sepia, smoke, candlelight, cinema bars.
+
+## Update 3.2
+- Animated clips (video files) can be mixed with still images, in the picker or in a folder. Each clip is one scene: cut to the scene length, or frozen on its last frame if shorter. The clip's own sound is not used.
