@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
@@ -51,6 +53,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.bahaa.srtvideogenerator.AudioSettings
 import com.bahaa.srtvideogenerator.BitmapLoader
+import com.bahaa.srtvideogenerator.CaptionPosition
+import com.bahaa.srtvideogenerator.CaptionPreset
+import com.bahaa.srtvideogenerator.EffectSettings
+import com.bahaa.srtvideogenerator.EffectType
+import com.bahaa.srtvideogenerator.EnhanceSettings
 import com.bahaa.srtvideogenerator.MainViewModel
 import com.bahaa.srtvideogenerator.Resolution
 import com.bahaa.srtvideogenerator.SfxChoice
@@ -84,6 +91,7 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     }
 
     var previewIndex by remember { mutableStateOf<Int?>(null) }
+    var effectIndex by remember { mutableStateOf<Int?>(null) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().statusBarsPadding(),
@@ -140,22 +148,38 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         }
 
         // ---------------- per-image ----------------
-        if (s.transitions.enabled && s.images.isNotEmpty()) {
+        if (s.images.isNotEmpty()) {
+            item {
+                Text("Per-image settings (transition, sound, effect)", style = MaterialTheme.typography.titleMedium)
+            }
             itemsIndexed(s.images) { i, img ->
                 Card(Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.padding(10.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Thumb(img.uri)
-                        Column(Modifier.weight(1f)) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("${i + 1}. ${img.name}", maxLines = 1, style = MaterialTheme.typography.bodyMedium)
                             if (i == 0) {
-                                Text("Opening image", style = MaterialTheme.typography.bodySmall)
+                                Text("Opening image (no transition or sound)", style = MaterialTheme.typography.bodySmall)
                             } else {
-                                val label = img.transition?.label ?: "Default (${s.transitions.default.label})"
-                                Dropdown("Transition in", label, listOf<TransitionType?>(null) + TransitionType.entries,
-                                    { it?.label ?: "Default" }) { vm.setImageTransition(i, it) }
+                                if (s.transitions.enabled) {
+                                    val label = img.transition?.label ?: "Default (${s.transitions.default.label})"
+                                    Dropdown("Transition in", label, listOf<TransitionType?>(null) + TransitionType.entries,
+                                        { it?.label ?: "Default" }) { vm.setImageTransition(i, it) }
+                                }
+                                if (s.audio.sfxEnabled) {
+                                    val opts = listOf<SfxChoice?>(null) +
+                                        SfxChoice.entries.filter { it != SfxChoice.CUSTOM || s.audio.sfxCustomUri != null }
+                                    Dropdown("Sound", img.sfx?.label ?: "Default (${s.audio.sfxChoice.label})", opts,
+                                        { it?.label ?: "Default" }) { vm.setImageSfx(i, it) }
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { effectIndex = i }) {
+                                    Text(if (img.effect.type == EffectType.NONE) "Add effect" else "Effect: ${img.effect.type.label}", maxLines = 1)
+                                }
+                                if (i > 0 && s.transitions.enabled) TextButton(onClick = { previewIndex = i }) { Text("Preview") }
                             }
                         }
-                        if (i > 0) TextButton(onClick = { previewIndex = i }) { Text("Preview") }
                     }
                 }
             }
@@ -204,6 +228,38 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
             }
         }
 
+        // ---------------- subtitle style ----------------
+        item {
+            Section("6. Subtitle style") {
+                Dropdown("Style", s.caption.preset.label, CaptionPreset.entries, { it.label }) {
+                    vm.setCaption(s.caption.copy(preset = it))
+                }
+                LabeledSlider("Text size", "${(s.caption.sizeScale * 100).roundToInt()}%", s.caption.sizeScale, 0.6f..1.6f) {
+                    vm.setCaption(s.caption.copy(sizeScale = (it * 20).roundToInt() / 20f))
+                }
+                Dropdown("Position", s.caption.position.label, CaptionPosition.entries, { it.label }) {
+                    vm.setCaption(s.caption.copy(position = it))
+                }
+            }
+        }
+
+        // ---------------- enhance ----------------
+        item {
+            Section("7. Sharpen and colour") {
+                LabeledSlider("Sharpness", "${(s.enhance.sharpness * 100).roundToInt()}%", s.enhance.sharpness, 0f..1f) {
+                    vm.setEnhance(s.enhance.copy(sharpness = (it * 20).roundToInt() / 20f))
+                }
+                LabeledSlider("Contrast", "${(s.enhance.contrast * 100).roundToInt()}%", s.enhance.contrast, 0.8f..1.4f) {
+                    vm.setEnhance(s.enhance.copy(contrast = (it * 20).roundToInt() / 20f))
+                }
+                LabeledSlider("Colour", "${(s.enhance.colour * 100).roundToInt()}%", s.enhance.colour, 0.6f..1.6f) {
+                    vm.setEnhance(s.enhance.copy(colour = (it * 20).roundToInt() / 20f))
+                }
+                OutlinedButton(onClick = { vm.setEnhance(EnhanceSettings()) }) { Text("Reset to normal") }
+                Text("This only sharpens and adjusts colour. It does not add detail like AI upscaling.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
         // ---------------- generate ----------------
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -230,6 +286,58 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     previewIndex?.let { i ->
         PreviewDialog(vm, i) { previewIndex = null }
     }
+    effectIndex?.let { i ->
+        EffectDialog(vm, i) { effectIndex = null }
+    }
+}
+
+@Composable
+private fun EffectDialog(vm: MainViewModel, index: Int, onClose: () -> Unit) {
+    val s by vm.state.collectAsState()
+    val ctx = LocalContext.current
+    if (index !in s.images.indices) { onClose(); return }
+    var e by remember { mutableStateOf(s.images[index].effect) }
+    val params = remember { EffectPreviewParams() }
+    params.settings = e
+    val bmp by produceState<Bitmap?>(null, s.images[index].uri) {
+        value = withContext(Dispatchers.IO) { try { BitmapLoader.decode(ctx, s.images[index].uri, 640) } catch (_: Exception) { null } }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Effect for image ${index + 1}") },
+        confirmButton = {
+            TextButton(onClick = { vm.setImageEffect(index, e); onClose() }) { Text("Apply") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { vm.applyEffectToAll(e); onClose() }) { Text("Apply to all") }
+                TextButton(onClick = onClose) { Text("Cancel") }
+            }
+        },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val b = bmp
+                if (b == null) Text("Loading…")
+                else AndroidView(
+                    factory = { EffectPreviewView(it, b, params) },
+                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                )
+                Dropdown("Effect", e.type.label, EffectType.entries, { it.label }) { e = e.copy(type = it) }
+                if (e.type != EffectType.NONE) {
+                    LabeledSlider("Strength", "${(e.intensity * 100).roundToInt()}%", e.intensity, 0f..1f) { e = e.copy(intensity = it) }
+                    LabeledSlider("Speed", "%.1fx".format(e.speed), e.speed, 0.3f..3f) { e = e.copy(speed = (it * 10).roundToInt() / 10f) }
+                    LabeledSwitch("Only at the start of the image", e.onlyFirstSec != null) {
+                        e = e.copy(onlyFirstSec = if (it) 3f else null)
+                    }
+                    e.onlyFirstSec?.let { sec ->
+                        LabeledSlider("Stays for", "%.1f s".format(sec), sec, 1f..10f) {
+                            e = e.copy(onlyFirstSec = (it * 2).roundToInt() / 2f)
+                        }
+                    }
+                }
+            }
+        }
+    )
 }
 
 // ---------------------------------------------------------------- dialogs

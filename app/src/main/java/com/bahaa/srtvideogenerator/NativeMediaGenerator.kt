@@ -20,7 +20,9 @@ import com.bahaa.srtvideogenerator.gl.GlTexture
 import com.bahaa.srtvideogenerator.gl.SurfaceRenderer
 import java.io.File
 import java.nio.ByteBuffer
+import kotlin.math.exp
 import kotlin.math.max
+import kotlin.math.sin
 
 // ===== RECONSTRUCTED CLASS (original: NativeMediaGenerator). Method names renderImages / muxAudio /
 // decodeBitmap / publishVideo mirror the original; ALL bodies are NEW and unverified against it. =====
@@ -55,7 +57,7 @@ class NativeMediaGenerator(private val context: Context) {
 
             onProgress(0.75f, "Mixing audio…")
             val mixed = try {
-                AudioMixer(context).mix(req.audio, timeline, audioFile, voiceUs, cancelled) {
+                AudioMixer(context).mix(req.audio, timeline, audioFile, voiceUs, req.images.map { it.sfx }, cancelled) {
                     onProgress(0.75f + it * 0.2f, "Mixing audio…")
                 }
             } catch (e: InterruptedException) { throw Cancelled() }
@@ -107,7 +109,10 @@ class NativeMediaGenerator(private val context: Context) {
             val e0 = EglCore(inputSurface)
             egl = e0
             e0.makeCurrent()
-            val r = SurfaceRenderer(w, h).also { it.init() }
+            val r = SurfaceRenderer(w, h).also {
+                it.init()
+                it.setEnhance(req.enhance.sharpness, req.enhance.contrast, req.enhance.colour)
+            }
             renderer = r
 
             fun tex(i: Int): GlTexture = textures.getOrPut(i) {
@@ -128,14 +133,20 @@ class NativeMediaGenerator(private val context: Context) {
                     val from = b.sceneIndex - 1
                     val to = b.sceneIndex
                     keepLow = from
+                    val ma = motion(req, timeline, from, t)
+                    val mb = motion(req, timeline, to, t)
                     r.draw(
                         tex(from), tex(to), p, b.type.shaderId,
-                        zoomScale(req, timeline, from, t), zoomScale(req, timeline, to, t), timeSec
+                        ma[0], mb[0], timeSec, ma[1], ma[2], mb[1], mb[2]
                     )
+                    drawSceneOverlay(r, req, timeline, from, t, 1f - p)
+                    drawSceneOverlay(r, req, timeline, to, t, p)
                 } else {
                     val s = timeline.sceneAt(t)
                     keepLow = s
-                    r.draw(null, tex(s), 1f, 0, 1f, zoomScale(req, timeline, s, t), timeSec)
+                    val m = motion(req, timeline, s, t)
+                    r.draw(null, tex(s), 1f, 0, 1f, m[0], timeSec, 0f, 0f, m[1], m[2])
+                    drawSceneOverlay(r, req, timeline, s, t, 1f)
                 }
                 // free textures we will not need again
                 val iter = textures.entries.iterator()
@@ -145,8 +156,8 @@ class NativeMediaGenerator(private val context: Context) {
                 }
 
                 val word = wordCues.activeAt(t)
-                if (word != null) r.drawCaption(word.text, word = true)
-                if (req.showSubtitles) cues.activeAt(t)?.let { r.drawCaption(it.text, word = false) }
+                if (word != null) r.drawCaption(word.text, word = true, style = req.caption)
+                if (req.showSubtitles) cues.activeAt(t)?.let { r.drawCaption(it.text, word = false, style = req.caption) }
 
                 e0.setPresentationTimeNs(t * 1000L)
                 e0.swapBuffers()
@@ -164,6 +175,46 @@ class NativeMediaGenerator(private val context: Context) {
             if (drain.started) try { muxer.stop() } catch (_: Exception) {}
             muxer.release()
         }
+    }
+
+    private fun effectOf(req: RenderRequest, scene: Int): EffectSettings? =
+        req.images.getOrNull(scene)?.effect?.takeIf { it.type != EffectType.NONE }
+
+    /** Fades the effect out after "only first N seconds" (0.6 s fade). */
+    private fun effectAlpha(e: EffectSettings, tl: Timeline, scene: Int, t: Long): Float {
+        val only = e.onlyFirstSec ?: return 1f
+        val local = (t - tl.scenes[scene].startUs) / 1_000_000f
+        return ((only - local) / 0.6f).coerceIn(0f, 1f)
+    }
+
+    /** Returns [zoom, offsetX, offsetY] including screen-shake / zoom-pulse effects. */
+    private fun motion(req: RenderRequest, tl: Timeline, scene: Int, t: Long): FloatArray {
+        var zoom = zoomScale(req, tl, scene, t)
+        var ox = 0f
+        var oy = 0f
+        val e = effectOf(req, scene)
+        if (e != null && (e.type == EffectType.SHAKE || e.type == EffectType.ZOOM_PULSE)) {
+            val a = effectAlpha(e, tl, scene, t)
+            val local = (t - tl.scenes[scene].startUs) / 1_000_000f * e.speed
+            if (e.type == EffectType.SHAKE) {
+                val amp = (0.004f + 0.014f * e.intensity) * a
+                val ts = local * 11f
+                ox = amp * (sin(ts * 3.7f) + sin(ts * 2.3f + 1.3f)) * 0.5f
+                oy = amp * (sin(ts * 3.1f + 0.7f) + sin(ts * 2.9f + 2.1f)) * 0.5f
+                zoom *= 1f + (amp * 2f + 0.004f)
+            } else {
+                val ph = (local / 1.2f).let { it - kotlin.math.floor(it) }
+                zoom *= 1f + 0.09f * e.intensity * a * exp(-ph * 6f)
+            }
+        }
+        return floatArrayOf(zoom, ox, oy)
+    }
+
+    private fun drawSceneOverlay(r: SurfaceRenderer, req: RenderRequest, tl: Timeline, scene: Int, t: Long, mix: Float) {
+        val e = effectOf(req, scene) ?: return
+        if (e.type == EffectType.SHAKE || e.type == EffectType.ZOOM_PULSE) return
+        val local = (t - tl.scenes[scene].startUs) / 1_000_000f * e.speed + 50f
+        r.drawOverlay(e.type.ordinal, e.intensity, local, effectAlpha(e, tl, scene, t) * mix)
     }
 
     private fun zoomScale(req: RenderRequest, tl: Timeline, scene: Int, t: Long): Float {

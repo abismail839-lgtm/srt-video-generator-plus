@@ -11,6 +11,9 @@ import android.opengl.GLUtils
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import com.bahaa.srtvideogenerator.CaptionPosition
+import com.bahaa.srtvideogenerator.CaptionPreset
+import com.bahaa.srtvideogenerator.CaptionSettings
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -26,6 +29,12 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
 
     private var transProgram = 0
     private var capProgram = 0
+    private var ovProgram = 0
+    private val ovCache = HashMap<String, Int>()
+
+    private var sharp = 0f
+    private var contrast = 1f
+    private var colour = 1f
 
     private val quad: FloatBuffer = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder())
         .asFloatBuffer().apply { put(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)); position(0) }
@@ -40,6 +49,12 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
     fun init() {
         transProgram = link(VERTEX, TRANSITION_FRAGMENT)
         capProgram = link(VERTEX, CAPTION_FRAGMENT)
+        ovProgram = link(VERTEX, OVERLAY_FRAGMENT)
+    }
+
+    /** Sharpen / contrast / colour applied to every picture. 0 / 1 / 1 = off. */
+    fun setEnhance(sharpness: Float, contrastValue: Float, colourValue: Float) {
+        sharp = sharpness; contrast = contrastValue; colour = colourValue
     }
 
     // ---------- textures ----------
@@ -75,7 +90,8 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
      */
     fun draw(
         from: GlTexture?, to: GlTexture, progress: Float, type: Int,
-        zoomFrom: Float, zoomTo: Float, timeSec: Float
+        zoomFrom: Float, zoomTo: Float, timeSec: Float,
+        offAx: Float = 0f, offAy: Float = 0f, offBx: Float = 0f, offBy: Float = 0f
     ) {
         val a = from ?: to
         val za = if (from == null) zoomTo else zoomFrom
@@ -106,22 +122,52 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
         GLES20.glUniform1f(u("uTime"), timeSec)
         GLES20.glUniform1f(u("uAspect"), width.toFloat() / height)
         GLES20.glUniform1i(u("uType"), t)
+        GLES20.glUniform2f(u("uOffA"), offAx, offAy)
+        GLES20.glUniform2f(u("uOffB"), offBx, offBy)
+        GLES20.glUniform2f(u("uTexelA"), 1f / a.width, 1f / a.height)
+        GLES20.glUniform2f(u("uTexelB"), 1f / to.width, 1f / to.height)
+        GLES20.glUniform1f(u("uSharp"), sharp)
+        GLES20.glUniform1f(u("uContrast"), contrast)
+        GLES20.glUniform1f(u("uSat"), colour)
         GLES20.glUniform4f(u("uRect"), -1f, -1f, 1f, 1f)
         drawQuad(transProgram)
     }
 
-    /** word == true: big centred word-by-word style; false: normal bottom subtitle. */
-    fun drawCaption(text: String, word: Boolean) {
+    /** Draws an overlay effect (EffectType ordinal 1..9) over the current frame. */
+    fun drawOverlay(effect: Int, intensity: Float, timeSec: Float, alpha: Float) {
+        if (effect <= 0 || effect > 9 || alpha <= 0.001f) return
+        GLES20.glViewport(0, 0, width, height)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glUseProgram(ovProgram)
+        fun u(name: String) = ovCache.getOrPut(name) { GLES20.glGetUniformLocation(ovProgram, name) }
+        GLES20.glUniform4f(u("uRect"), -1f, -1f, 1f, 1f)
+        GLES20.glUniform1i(u("uEffect"), effect)
+        GLES20.glUniform1f(u("uIntensity"), intensity.coerceIn(0f, 1f))
+        GLES20.glUniform1f(u("uTime"), timeSec)
+        GLES20.glUniform1f(u("uAlpha"), alpha.coerceIn(0f, 1f))
+        GLES20.glUniform1f(u("uAspect"), width.toFloat() / height)
+        drawQuad(ovProgram)
+        GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    /** word == true: big centred word-by-word style; false: normal subtitle. */
+    fun drawCaption(text: String, word: Boolean, style: CaptionSettings = CaptionSettings()) {
         if (text.isBlank()) return
-        val key = "$word|$text"
+        val key = "$word|${style.preset}|${style.sizeScale}|$text"
         if (key != captionKey) {
             if (captionTex != 0) GLES20.glDeleteTextures(1, intArrayOf(captionTex), 0)
-            buildCaption(text, word)
+            buildCaption(text, word, style)
             captionKey = key
         }
         val wNdc = 2f * captionW / width
         val hNdc = 2f * captionH / height
-        val bottom = if (word) (1f - 2f * 0.78f) - hNdc / 2f else (1f - 2f * 0.93f)
+        val bottom = when (style.position) {
+            CaptionPosition.TOP -> 1f - 2f * 0.06f - hNdc
+            CaptionPosition.MIDDLE -> -hNdc / 2f
+            CaptionPosition.BOTTOM ->
+                if (word) (1f - 2f * 0.78f) - hNdc / 2f else (1f - 2f * 0.93f)
+        }
         GLES20.glViewport(0, 0, width, height)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA) // premultiplied bitmap
@@ -137,34 +183,62 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
         GLES20.glDisable(GLES20.GL_BLEND)
     }
 
-    private fun buildCaption(text: String, word: Boolean) {
+    private fun buildCaption(text: String, word: Boolean, style: CaptionSettings) {
         val minSide = min(width, height).toFloat()
-        val size = if (word) minSide * 0.13f else minSide * 0.055f
+        val preset = style.preset
+        val baseSize = if (word) minSide * 0.13f else minSide * 0.055f
+        val size = baseSize * style.sizeScale * (if (preset == CaptionPreset.BOLD_YELLOW) 1.1f else 1f)
         val pad = (size * 0.45f).toInt()
         val maxW = (width * 0.88f).toInt()
 
+        val fillColor = when (preset) {
+            CaptionPreset.BOLD_YELLOW -> Color.rgb(255, 212, 0)
+            CaptionPreset.PARCHMENT -> Color.rgb(59, 36, 18)
+            else -> Color.WHITE
+        }
+        val strokeFactor = when (preset) {
+            CaptionPreset.CLASSIC -> 0.16f
+            CaptionPreset.BOLD_YELLOW -> 0.24f
+            CaptionPreset.CLEAN -> 0.10f
+            else -> 0f
+        }
+        val boxColor = when (preset) {
+            CaptionPreset.CLASSIC -> if (word) 0 else Color.argb(140, 0, 0, 0)
+            CaptionPreset.BLACK_BOX -> Color.argb(225, 0, 0, 0)
+            CaptionPreset.PARCHMENT -> Color.argb(235, 235, 217, 168)
+            else -> 0
+        }
+        val face = if (preset == CaptionPreset.PARCHMENT)
+            Typeface.create(Typeface.SERIF, Typeface.BOLD) else Typeface.DEFAULT_BOLD
+
         val fillPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = Typeface.DEFAULT_BOLD; textSize = size; color = Color.WHITE
+            typeface = face; textSize = size; color = fillColor
         }
         val strokePaint = TextPaint(fillPaint).apply {
-            style = Paint.Style.STROKE; strokeWidth = size * 0.16f; color = Color.BLACK
+            style = Paint.Style.STROKE; strokeWidth = size * strokeFactor; color = Color.BLACK
             strokeJoin = Paint.Join.ROUND
         }
         fun layout(p: TextPaint) = StaticLayout.Builder.obtain(text, 0, text.length, p, maxW)
             .setAlignment(Layout.Alignment.ALIGN_CENTER).setLineSpacing(0f, 1.05f).build()
 
         val fill = layout(fillPaint)
-        val stroke = layout(strokePaint)
         val bw = maxW + pad * 2
         val bh = fill.height + pad * 2
         val bmp = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
-        if (!word) {
-            val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(140, 0, 0, 0) }
-            c.drawRoundRect(RectF(0f, 0f, bw.toFloat(), bh.toFloat()), size * 0.4f, size * 0.4f, bg)
+        if (boxColor != 0) {
+            val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = boxColor }
+            val r = if (preset == CaptionPreset.BLACK_BOX) size * 0.15f else size * 0.4f
+            c.drawRoundRect(RectF(0f, 0f, bw.toFloat(), bh.toFloat()), r, r, bg)
+            if (preset == CaptionPreset.PARCHMENT) {
+                val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.rgb(120, 82, 40); this.style = Paint.Style.STROKE; strokeWidth = size * 0.06f
+                }
+                c.drawRoundRect(RectF(2f, 2f, bw - 2f, bh - 2f), r, r, edge)
+            }
         }
         c.translate(pad.toFloat(), pad.toFloat())
-        stroke.draw(c)
+        if (strokeFactor > 0f) layout(strokePaint).draw(c)
         fill.draw(c)
 
         val tex = createTexture(bmp)
@@ -216,8 +290,10 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
         captionKey = null
         if (transProgram != 0) GLES20.glDeleteProgram(transProgram)
         if (capProgram != 0) GLES20.glDeleteProgram(capProgram)
+        if (ovProgram != 0) GLES20.glDeleteProgram(ovProgram)
         transProgram = 0
         capProgram = 0
+        ovProgram = 0
     }
 
     private companion object {
@@ -244,7 +320,157 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
 
         // Type ids == TransitionType.ordinal:
         // 0 cut, 1 fade, 2 dissolve, 3 slide L, 4 slide R, 5 slide U, 6 slide D,
-        // 7 spin, 8 blur, 9 wipe, 10 glitch, 11 zoom
+        // 7 spin, 8 blur, 9 wipe, 10 glitch, 11 zoom, 12 dip white, 13 flash, 14 circle,
+        // 15 pixelate, 16 shake cut
+
+        // Effect ids == EffectType.ordinal: 1 white edge, 2 snow, 3 rain, 4 dust, 5 embers,
+        // 6 old film, 7 vignette, 8 glow edge, 9 flash pulses. Output is premultiplied alpha.
+        const val OVERLAY_FRAGMENT = """
+            precision highp float;
+            varying vec2 vUv;
+            uniform int uEffect;
+            uniform float uIntensity;
+            uniform float uTime;
+            uniform float uAlpha;
+            uniform float uAspect;
+
+            float hash(vec2 p) {
+                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+            }
+            void over(inout vec4 acc, vec3 c, float a) {
+                acc.rgb = acc.rgb * (1.0 - a) + c * a;
+                acc.a = acc.a + a * (1.0 - acc.a);
+            }
+
+            // dots on a grid, falling (dir = -1) or rising (dir = +1)
+            float particles(vec2 uv, float scale, float speed, float dir, float size, float density, float sway) {
+                vec2 p = uv * vec2(uAspect, 1.0) * scale;
+                p.y += dir * uTime * speed * scale * 0.12;
+                vec2 id0 = floor(p);
+                p.x += sin(uTime * 0.7 + id0.y * 1.7) * sway;
+                vec2 id = floor(p);
+                vec2 f = fract(p);
+                float h = hash(id);
+                vec2 c = vec2(0.25 + 0.5 * hash(id + 3.1), 0.25 + 0.5 * hash(id + 7.7));
+                float d = length(f - c);
+                float present = step(1.0 - density, h);
+                float sz = size * (0.5 + 0.5 * hash(id + 1.3));
+                return present * (1.0 - smoothstep(sz * 0.4, sz, d));
+            }
+
+            void main() {
+                vec2 uv = vUv;
+                float I = uIntensity;
+                float t = uTime;
+                vec4 acc = vec4(0.0);
+
+                if (uEffect == 1) {                       // shaky white hand-drawn edge
+                    float dxs = min(uv.x, 1.0 - uv.x) * uAspect;
+                    float dys = min(uv.y, 1.0 - uv.y);
+                    float depth; float along; float cornerD; float side;
+                    if (dxs < dys) {
+                        depth = dxs; along = uv.y; cornerD = min(uv.y, 1.0 - uv.y);
+                        side = uv.x < 0.5 ? 0.0 : 1.0;
+                    } else {
+                        depth = dys; along = uv.x * uAspect; cornerD = min(uv.x, 1.0 - uv.x) * uAspect;
+                        side = uv.y < 0.5 ? 2.0 : 3.0;
+                    }
+                    float corner = 1.0 - smoothstep(0.0, 0.40, cornerD);
+                    float dens = 70.0;
+                    float q = along * dens + depth * dens * 0.35 * (side < 1.5 ? 1.0 : -1.0);
+                    float id = floor(q);
+                    float f = fract(q);
+                    float tick = floor(t * 9.0);
+                    float h = hash(vec2(id, side * 17.0));
+                    float hl = hash(vec2(id + tick * 0.37, side * 5.0 + tick));
+                    float wob = sin(t * 7.0 + h * 6.28) * 0.12;
+                    float baseLen = 0.015 + 0.085 * hl;
+                    float len = baseLen * (0.5 + I * 1.1) * (1.0 + 2.4 * corner);
+                    float width = 0.13 + 0.12 * corner;
+                    float present = step(h, 0.55 + 0.4 * I + 0.25 * corner);
+                    float line = 1.0 - smoothstep(width * 0.7, width * 1.2, abs(f - 0.5 - wob));
+                    float reach = 1.0 - smoothstep(len * 0.55, len, depth);
+                    // thin continuous wobbling line hugging the very edge
+                    float wob2 = sin(along * 38.0 + t * 6.0) * 0.004 + sin(along * 17.0 - t * 4.0) * 0.003;
+                    float rim = 1.0 - smoothstep(0.004, 0.012, abs(depth - 0.006 - wob2));
+                    float a = clamp(present * line * reach + rim * 0.6 * I, 0.0, 1.0);
+                    over(acc, vec3(0.98), a);
+                } else if (uEffect == 2) {                // snow
+                    float a = 0.0;
+                    float dn = 0.10 + 0.30 * I;
+                    a += particles(uv, 14.0, 1.2, -1.0, 0.16, dn, 0.35);
+                    a += particles(uv + 0.31, 24.0, 1.7, -1.0, 0.14, dn, 0.30) * 0.85;
+                    a += particles(uv + 0.67, 40.0, 2.3, -1.0, 0.12, dn, 0.25) * 0.7;
+                    over(acc, vec3(1.0), clamp(a, 0.0, 1.0) * 0.9);
+                } else if (uEffect == 3) {                // rain
+                    float a = 0.0;
+                    for (int k = 0; k < 2; k++) {
+                        float fk = float(k);
+                        vec2 p = vec2(uv.x * uAspect * (55.0 + fk * 35.0) + uv.y * 7.0,
+                                      uv.y * (7.0 + fk * 3.0) - t * (7.0 + fk * 3.0));
+                        vec2 id = floor(p);
+                        vec2 f = fract(p);
+                        float h = hash(id + fk * 9.0);
+                        float present = step(1.0 - (0.05 + 0.25 * I), h);
+                        float xo = (hash(id + 2.0) - 0.5) * 0.5;
+                        float line = 1.0 - smoothstep(0.03, 0.08, abs(f.x - 0.5 - xo));
+                        float tail = smoothstep(0.0, 0.25, f.y) * (1.0 - smoothstep(0.55, 1.0, f.y));
+                        a += present * line * tail * (0.55 - fk * 0.15);
+                    }
+                    over(acc, vec3(0.78, 0.86, 1.0), clamp(a, 0.0, 1.0));
+                    over(acc, vec3(0.0, 0.03, 0.08), 0.10 * I);
+                } else if (uEffect == 4) {                // floating dust
+                    float a = 0.0;
+                    float dn = 0.08 + 0.25 * I;
+                    a += particles(uv, 9.0, 0.35, 1.0, 0.22, dn, 0.9);
+                    a += particles(uv + 0.4, 17.0, 0.5, 1.0, 0.18, dn, 0.7) * 0.8;
+                    a += particles(uv + 0.8, 30.0, 0.7, 1.0, 0.14, dn, 0.5) * 0.6;
+                    over(acc, vec3(1.0, 0.96, 0.85), clamp(a, 0.0, 1.0) * 0.45);
+                } else if (uEffect == 5) {                // sparks / embers
+                    float dn = 0.05 + 0.22 * I;
+                    float a1 = particles(uv, 18.0, 3.0, 1.0, 0.11, dn, 0.8);
+                    float a2 = particles(uv + 0.5, 32.0, 4.2, 1.0, 0.09, dn, 0.6);
+                    float fl = 0.7 + 0.3 * sin(t * 18.0 + uv.x * 40.0);
+                    over(acc, mix(vec3(1.0, 0.45, 0.08), vec3(1.0, 0.85, 0.3), a2), clamp(a1 + a2, 0.0, 1.0) * fl);
+                } else if (uEffect == 6) {                // old film
+                    float fr = floor(t * 24.0);
+                    float g = hash(uv * vec2(uAspect * 420.0, 420.0) + fr) - 0.5;
+                    over(acc, g > 0.0 ? vec3(1.0) : vec3(0.0), abs(g) * (0.25 + 0.5 * I));
+                    float fl = hash(vec2(floor(t * 13.0), 4.0));
+                    over(acc, vec3(0.0), 0.10 * I * fl);
+                    for (int k = 0; k < 3; k++) {
+                        float fk = float(k);
+                        float on = step(0.72, hash(vec2(floor(t * 10.0) + fk, 9.0 + fk)));
+                        float x = hash(vec2(floor(t * 10.0), fk + 2.0));
+                        float line = 1.0 - smoothstep(0.0006, 0.0022, abs(uv.x - x));
+                        over(acc, vec3(0.95), on * line * (0.25 + 0.5 * I));
+                    }
+                    float sp = hash(floor(uv * vec2(uAspect * 40.0, 40.0)) + floor(t * 8.0));
+                    vec2 sf = fract(uv * vec2(uAspect * 40.0, 40.0)) - 0.5;
+                    over(acc, vec3(0.05), step(0.985, sp) * (1.0 - smoothstep(0.1, 0.3, length(sf))) * I);
+                    float d = length((uv - 0.5) * vec2(uAspect * 0.8, 1.0));
+                    over(acc, vec3(0.08, 0.05, 0.0), smoothstep(0.4, 0.95, d) * 0.55 * I);
+                } else if (uEffect == 7) {                // dark vignette
+                    float d = length((uv - 0.5) * vec2(uAspect * 0.75, 1.0));
+                    float a = smoothstep(0.30, 0.85, d) * (0.45 + 0.5 * I);
+                    over(acc, vec3(0.0), a);
+                } else if (uEffect == 8) {                // soft white glow edge
+                    float de = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+                    float breathe = 0.85 + 0.15 * sin(t * 1.6);
+                    float a = 1.0 - smoothstep(0.0, 0.05 + 0.17 * I, de);
+                    over(acc, vec3(1.0), a * a * 0.85 * breathe);
+                } else if (uEffect == 9) {                // flash pulses
+                    float period = 1.5;
+                    float n = floor(t / period);
+                    float ph = fract(t / period);
+                    float on = step(0.3, hash(vec2(n, 5.0)));
+                    float a = exp(-ph * 9.0) * (0.25 + 0.55 * I) * on;
+                    over(acc, vec3(1.0), a);
+                }
+                gl_FragColor = acc * uAlpha;
+            }
+        """
+
         const val TRANSITION_FRAGMENT = """
             precision highp float;
             varying vec2 vUv;
@@ -258,21 +484,44 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
             uniform float uTime;
             uniform float uAspect;
             uniform int uType;
+            uniform vec2 uOffA;
+            uniform vec2 uOffB;
+            uniform vec2 uTexelA;
+            uniform vec2 uTexelB;
+            uniform float uSharp;
+            uniform float uContrast;
+            uniform float uSat;
 
             const float PI = 3.14159265;
 
             // alpha = 0 outside the picture
             vec4 sampleA(vec2 uv, float extra) {
                 if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec4(0.0);
-                vec2 c = (uv - 0.5) / (uZoomA * extra) + 0.5;
+                vec2 c = (uv - 0.5) / (uZoomA * extra) + 0.5 - uOffA;
                 c = (c - 0.5) * uCropA + 0.5;
-                return vec4(texture2D(uTexA, c).rgb, 1.0);
+                vec3 col = texture2D(uTexA, c).rgb;
+                if (uSharp > 0.0) {
+                    vec3 n = texture2D(uTexA, c + vec2(uTexelA.x, 0.0)).rgb
+                           + texture2D(uTexA, c - vec2(uTexelA.x, 0.0)).rgb
+                           + texture2D(uTexA, c + vec2(0.0, uTexelA.y)).rgb
+                           + texture2D(uTexA, c - vec2(0.0, uTexelA.y)).rgb;
+                    col += (col - n * 0.25) * uSharp * 1.6;
+                }
+                return vec4(col, 1.0);
             }
             vec4 sampleB(vec2 uv, float extra) {
                 if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec4(0.0);
-                vec2 c = (uv - 0.5) / (uZoomB * extra) + 0.5;
+                vec2 c = (uv - 0.5) / (uZoomB * extra) + 0.5 - uOffB;
                 c = (c - 0.5) * uCropB + 0.5;
-                return vec4(texture2D(uTexB, c).rgb, 1.0);
+                vec3 col = texture2D(uTexB, c).rgb;
+                if (uSharp > 0.0) {
+                    vec3 n = texture2D(uTexB, c + vec2(uTexelB.x, 0.0)).rgb
+                           + texture2D(uTexB, c - vec2(uTexelB.x, 0.0)).rgb
+                           + texture2D(uTexB, c + vec2(0.0, uTexelB.y)).rgb
+                           + texture2D(uTexB, c - vec2(0.0, uTexelB.y)).rgb;
+                    col += (col - n * 0.25) * uSharp * 1.6;
+                }
+                return vec4(col, 1.0);
             }
             vec2 rotScale(vec2 uv, float ang, float sc) {
                 vec2 d = uv - 0.5;
@@ -370,10 +619,42 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
                     vec3 a = sampleA(uv, 1.0 + e * 0.8).rgb;
                     vec3 b = sampleB(uv, 1.4 - 0.4 * e).rgb;
                     col = mix(a, b, e);
+                } else if (uType == 12) {                 // dip to white
+                    if (p < 0.5) col = mix(sampleA(uv, 1.0).rgb, vec3(1.0), p * 2.0);
+                    else col = mix(vec3(1.0), sampleB(uv, 1.0).rgb, p * 2.0 - 1.0);
+                } else if (uType == 13) {                 // flash
+                    vec3 base = (p < 0.5) ? sampleA(uv, 1.0).rgb : sampleB(uv, 1.0).rgb;
+                    float f = 1.0 - abs(2.0 * p - 1.0);
+                    col = mix(base, vec3(1.0), f * f);
+                } else if (uType == 14) {                 // circle reveal
+                    vec2 d = (uv - 0.5) * vec2(uAspect, 1.0);
+                    float maxR = length(vec2(uAspect, 1.0) * 0.5) * 1.05;
+                    float r = e * maxR;
+                    float m = 1.0 - smoothstep(r - 0.02, r + 0.02, length(d));
+                    col = mix(sampleA(uv, 1.0).rgb, sampleB(uv, 1.0).rgb, m);
+                } else if (uType == 15) {                 // pixelate
+                    float amp = sin(p * PI);
+                    float cells = mix(480.0, 14.0, amp);
+                    vec2 q = (floor(uv * vec2(cells * uAspect, cells)) + 0.5) / vec2(cells * uAspect, cells);
+                    col = (p < 0.5) ? sampleA(q, 1.0).rgb : sampleB(q, 1.0).rgb;
+                } else if (uType == 16) {                 // shake cut
+                    float amp = sin(p * PI);
+                    float tt = floor(uTime * 30.0);
+                    vec2 o = (vec2(hash(vec2(tt, 1.0)), hash(vec2(tt, 2.0))) - 0.5) * 0.09 * amp;
+                    float split = 0.012 * amp;
+                    vec2 u = uv + o;
+                    if (p < 0.5) {
+                        col = vec3(sampleA(u + vec2(split, 0.0), 1.15).r, sampleA(u, 1.15).g, sampleA(u - vec2(split, 0.0), 1.15).b);
+                    } else {
+                        col = vec3(sampleB(u + vec2(split, 0.0), 1.15).r, sampleB(u, 1.15).g, sampleB(u - vec2(split, 0.0), 1.15).b);
+                    }
                 } else {                                  // 0: hard cut
                     col = (p < 0.5) ? sampleA(uv, 1.0).rgb : sampleB(uv, 1.0).rgb;
                 }
-                gl_FragColor = vec4(col, 1.0);
+                float lum = dot(col, vec3(0.299, 0.587, 0.114));
+                col = mix(vec3(lum), col, uSat);
+                col = (col - 0.5) * uContrast + 0.5;
+                gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
             }
         """
     }

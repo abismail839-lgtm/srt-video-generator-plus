@@ -21,6 +21,11 @@ object SfxSynth {
         SfxChoice.WHOOSH -> 0.30f
         SfxChoice.SWIPE -> 0.12f
         SfxChoice.IMPACT -> 0.0f
+        SfxChoice.BOOM -> 0.0f
+        SfxChoice.CLICK -> 0.02f
+        SfxChoice.POP -> 0.03f
+        SfxChoice.ZAP -> 0.10f
+        SfxChoice.PAGE -> 0.20f
         else -> 0.10f
     }
 
@@ -28,6 +33,10 @@ object SfxSynth {
         TransitionType.SLIDE_LEFT, TransitionType.SLIDE_RIGHT,
         TransitionType.SLIDE_UP, TransitionType.SLIDE_DOWN -> SfxChoice.SWIPE
         TransitionType.GLITCH, TransitionType.ZOOM -> SfxChoice.IMPACT
+        TransitionType.FLASH, TransitionType.CIRCLE -> SfxChoice.POP
+        TransitionType.PIXELATE -> SfxChoice.ZAP
+        TransitionType.SHAKE_CUT -> SfxChoice.BOOM
+        TransitionType.NONE -> SfxChoice.CLICK
         else -> SfxChoice.WHOOSH
     }
 
@@ -35,6 +44,11 @@ object SfxSynth {
         SfxChoice.WHOOSH -> whoosh()
         SfxChoice.SWIPE -> swipe()
         SfxChoice.IMPACT -> impact()
+        SfxChoice.CLICK -> click()
+        SfxChoice.POP -> pop()
+        SfxChoice.ZAP -> zap()
+        SfxChoice.PAGE -> page()
+        SfxChoice.BOOM -> boom()
         else -> error("Not a built-in sound: $choice")
     }
 
@@ -96,6 +110,87 @@ object SfxSynth {
             val hit = lp * 3.0 * exp(-t * 11.0)
             val click = if (i < 60) (1.0 - i / 60.0) * 0.4 else 0.0
             mono[i] = (thump + hit + click).toFloat()
+        }
+        return stereo(mono)
+    }
+
+    /** Very short, dry tick. */
+    private fun click(): FloatArray {
+        val n = (0.12f * TARGET_RATE).toInt()
+        val rnd = Random(4)
+        val mono = FloatArray(n)
+        for (i in 0 until n) {
+            val t = i.toDouble() / TARGET_RATE
+            val env = exp(-t * 90.0)
+            mono[i] = ((sin(2.0 * PI * 1800.0 * t) * 0.6 + rnd.nextGaussian() * 0.35) * env).toFloat()
+        }
+        return stereo(mono)
+    }
+
+    /** Soft bubble pop: quick downward sine sweep. */
+    private fun pop(): FloatArray {
+        val n = (0.20f * TARGET_RATE).toInt()
+        val rnd = Random(5)
+        val mono = FloatArray(n)
+        var phase = 0.0
+        for (i in 0 until n) {
+            val t = i.toDouble() / TARGET_RATE
+            val freq = 220.0 + 700.0 * exp(-t * 30.0)
+            phase += 2.0 * PI * freq / TARGET_RATE
+            mono[i] = ((sin(phase) * exp(-t * 22.0)) + rnd.nextGaussian() * 0.03 * exp(-t * 60.0)).toFloat()
+        }
+        return stereo(mono)
+    }
+
+    /** Digital glitch zap: stepped random pitch with a harsh square-ish tone. */
+    private fun zap(): FloatArray {
+        val n = (0.32f * TARGET_RATE).toInt()
+        val rnd = Random(6)
+        val mono = FloatArray(n)
+        var phase = 0.0
+        var freq = 800.0
+        val step = (0.015f * TARGET_RATE).toInt()
+        for (i in 0 until n) {
+            if (i % step == 0) freq = 300.0 + rnd.nextDouble() * 2700.0
+            val t = i.toDouble() / TARGET_RATE
+            phase += 2.0 * PI * freq / TARGET_RATE
+            val square = if (sin(phase) >= 0.0) 1.0 else -1.0
+            mono[i] = (square * 0.6 * exp(-t * 8.0)).toFloat()
+        }
+        return stereo(mono)
+    }
+
+    /** Paper flip: two quick bursts of high-passed noise. */
+    private fun page(): FloatArray {
+        val n = (0.45f * TARGET_RATE).toInt()
+        val rnd = Random(7)
+        val mono = FloatArray(n)
+        var prev = 0.0
+        for (i in 0 until n) {
+            val t = i.toDouble() / TARGET_RATE
+            val noise = rnd.nextGaussian()
+            val high = noise - prev
+            prev = noise
+            val flap1 = exp(-t * 14.0)
+            val flap2 = if (t > 0.12) exp(-(t - 0.12) * 10.0) * 0.7 else 0.0
+            mono[i] = (high * (flap1 + flap2)).toFloat()
+        }
+        return stereo(mono)
+    }
+
+    /** Long, deep cinematic boom. */
+    private fun boom(): FloatArray {
+        val n = (1.6f * TARGET_RATE).toInt()
+        val rnd = Random(8)
+        val mono = FloatArray(n)
+        var phase = 0.0
+        var lp = 0.0
+        for (i in 0 until n) {
+            val t = i.toDouble() / TARGET_RATE
+            val freq = 30.0 + 40.0 * exp(-t * 5.0)
+            phase += 2.0 * PI * freq / TARGET_RATE
+            lp += 0.03 * (rnd.nextGaussian() - lp)
+            mono[i] = (sin(phase) * exp(-t * 2.2) + lp * 4.0 * exp(-t * 3.0)).toFloat()
         }
         return stereo(mono)
     }

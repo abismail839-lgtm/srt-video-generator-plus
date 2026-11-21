@@ -18,3 +18,10 @@ If the build fails, copy the red error lines from the Actions log and send them 
 - NativeMediaGenerator.kt – renderImages, muxAudio, publishVideo
 - audio/*                – decode, mix (voice, music, fades, loop), synthesised whoosh/swipe/impact, AAC
 - ui/*, MainViewModel.kt – Compose screen, per-image transitions, live preview
+
+## Update 3.0 (Part 2)
+- New transitions: dip to white, flash, circle reveal, pixelate, shake cut.
+- New sounds: click, pop, zap, page turn, deep boom; each image can have its own sound (or none).
+- Per-image overlay effects with strength, speed, "only at the start" timer and live preview: shaky white edge, snow, rain, dust, sparks, old film, vignette, glow edge, flash pulses, screen shake, zoom pulse.
+- Subtitle styles (5 presets), size and position.
+- Sharpen / contrast / colour (no AI upscaling).

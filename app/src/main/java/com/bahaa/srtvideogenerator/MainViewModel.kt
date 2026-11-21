@@ -30,6 +30,8 @@ data class UiState(
     val showSubtitles: Boolean = true,
     val transitions: TransitionSettings = TransitionSettings(),
     val audio: AudioSettings = AudioSettings(),
+    val caption: CaptionSettings = CaptionSettings(),
+    val enhance: EnhanceSettings = EnhanceSettings(),
     val rendering: Boolean = false,
     val progress: Float = 0f,
     val status: String = "",
@@ -108,7 +110,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update {
             it.copy(
                 resolution = saved.resolution, fps = saved.fps, zoomMode = saved.zoomMode,
-                showSubtitles = saved.showSubtitles, transitions = saved.transitions, audio = saved.audio
+                showSubtitles = saved.showSubtitles, transitions = saved.transitions, audio = saved.audio,
+                caption = saved.caption, enhance = saved.enhance
             )
         }
         // mirror the background renderer's progress into the screen state
@@ -124,7 +127,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun save() {
         val s = _state.value
-        store.save(SavedSettings(s.resolution, s.fps, s.zoomMode, s.showSubtitles, s.transitions, s.audio))
+        store.save(SavedSettings(s.resolution, s.fps, s.zoomMode, s.showSubtitles, s.transitions, s.audio, s.caption, s.enhance))
     }
 
     private fun persist(uri: Uri) {
@@ -199,6 +202,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setShowSubtitles(v: Boolean) { _state.update { it.copy(showSubtitles = v) }; save() }
     fun setTransitions(t: TransitionSettings) { _state.update { it.copy(transitions = t) }; save() }
     fun setAudio(a: AudioSettings) { _state.update { it.copy(audio = a) }; save() }
+    fun setCaption(c: CaptionSettings) { _state.update { it.copy(caption = c) }; save() }
+    fun setEnhance(e: EnhanceSettings) { _state.update { it.copy(enhance = e) }; save() }
+
+    fun setImageSfx(index: Int, sfx: SfxChoice?) = _state.update { s ->
+        s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(sfx = sfx) else im })
+    }
+
+    fun setImageEffect(index: Int, effect: EffectSettings) = _state.update { s ->
+        s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(effect = effect) else im })
+    }
+
+    /** Copies one image's effect to every image. */
+    fun applyEffectToAll(effect: EffectSettings) = _state.update { s ->
+        s.copy(images = s.images.map { it.copy(effect = effect) })
+    }
 
     fun setImageTransition(index: Int, type: TransitionType?) = _state.update { s ->
         s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(transition = type) else im })
@@ -229,7 +247,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val req = RenderRequest(
             images = s.images, srtUri = s.srtUri, wordSrtUri = s.wordSrtUri,
             resolution = s.resolution, fps = s.fps, zoomMode = s.zoomMode, showSubtitles = s.showSubtitles,
-            transitions = s.transitions, audio = s.audio
+            transitions = s.transitions, audio = s.audio, caption = s.caption, enhance = s.enhance
         )
         if (RenderController.begin(req)) {
             ContextCompat.startForegroundService(ctx, Intent(ctx, RenderService::class.java))

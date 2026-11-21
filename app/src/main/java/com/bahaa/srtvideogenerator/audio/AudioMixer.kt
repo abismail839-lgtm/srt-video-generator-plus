@@ -31,13 +31,14 @@ class AudioMixer(private val context: Context) {
         timeline: Timeline,
         out: File,
         voiceUs: Long,
+        perImageSfx: List<SfxChoice?>,
         cancelled: () -> Boolean,
         onProgress: (Float) -> Unit
     ): File? {
         if (!hasAnyAudio(a, timeline)) return null
 
         val totalFrames = timeline.totalUs * TARGET_RATE / 1_000_000L
-        val events = if (a.sfxEnabled) planSfx(a, timeline) else emptyList()
+        val events = if (a.sfxEnabled) planSfx(a, timeline, perImageSfx) else emptyList()
 
         var voice: DecodedAudioSource? = null
         var music: DecodedAudioSource? = null
@@ -130,18 +131,20 @@ class AudioMixer(private val context: Context) {
         return gain.coerceIn(1f, 8f)
     }
 
-    private fun planSfx(a: AudioSettings, timeline: Timeline): List<SfxEvent> {
+    private fun planSfx(a: AudioSettings, timeline: Timeline, perImage: List<SfxChoice?>): List<SfxEvent> {
         val builtIn = HashMap<SfxChoice, FloatArray>()
+        val needsCustom = a.sfxChoice == SfxChoice.CUSTOM || perImage.any { it == SfxChoice.CUSTOM }
         val custom: FloatArray? =
-            if (a.sfxChoice == SfxChoice.CUSTOM && a.sfxCustomUri != null)
-                DecodedAudioSource.decodeAll(context, a.sfxCustomUri) else null
-        if (a.sfxChoice == SfxChoice.CUSTOM && custom == null) return emptyList()
+            if (needsCustom && a.sfxCustomUri != null) DecodedAudioSource.decodeAll(context, a.sfxCustomUri) else null
 
         val events = ArrayList<SfxEvent>()
         for (b in timeline.boundaries) {
             if (b == null) continue
-            val choice = if (a.sfxChoice == SfxChoice.AUTO) SfxSynth.autoChoiceFor(b.type) else a.sfxChoice
-            val clip = if (choice == SfxChoice.CUSTOM) custom!! else builtIn.getOrPut(choice) { SfxSynth.generate(choice) }
+            val chosen = perImage.getOrNull(b.sceneIndex) ?: a.sfxChoice
+            if (chosen == SfxChoice.NONE) continue
+            val choice = if (chosen == SfxChoice.AUTO) SfxSynth.autoChoiceFor(b.type) else chosen
+            val clip = if (choice == SfxChoice.CUSTOM) (custom ?: continue)
+            else builtIn.getOrPut(choice) { SfxSynth.generate(choice) }
             val startUs = b.centerUs - (SfxSynth.leadSeconds(choice) * 1_000_000L).toLong()
             val startFrame = (startUs * TARGET_RATE / 1_000_000L).coerceAtLeast(0)
             events += SfxEvent(startFrame, clip, a.sfxVolume)

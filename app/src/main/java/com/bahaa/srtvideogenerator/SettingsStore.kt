@@ -11,7 +11,9 @@ data class SavedSettings(
     val zoomMode: ZoomMode = ZoomMode.IN,
     val showSubtitles: Boolean = true,
     val transitions: TransitionSettings = TransitionSettings(),
-    val audio: AudioSettings = AudioSettings()
+    val audio: AudioSettings = AudioSettings(),
+    val caption: CaptionSettings = CaptionSettings(),
+    val enhance: EnhanceSettings = EnhanceSettings()
 )
 
 class SettingsStore(context: Context) {
@@ -48,6 +50,16 @@ class SettingsStore(context: Context) {
                 sfxEnabled = prefs.getBoolean("sfxEnabled", a.sfxEnabled),
                 sfxChoice = sfxChoice,
                 sfxVolume = prefs.getFloat("sfxVolume", a.sfxVolume)
+            ),
+            caption = CaptionSettings(
+                preset = enumOf("capPreset", d.caption.preset),
+                sizeScale = prefs.getFloat("capSize", d.caption.sizeScale),
+                position = enumOf("capPos", d.caption.position)
+            ),
+            enhance = EnhanceSettings(
+                sharpness = prefs.getFloat("enSharp", d.enhance.sharpness),
+                contrast = prefs.getFloat("enContrast", d.enhance.contrast),
+                colour = prefs.getFloat("enColour", d.enhance.colour)
             )
         )
     }
@@ -70,6 +82,12 @@ class SettingsStore(context: Context) {
             .putBoolean("sfxEnabled", s.audio.sfxEnabled)
             .putString("sfxChoice", s.audio.sfxChoice.name)
             .putFloat("sfxVolume", s.audio.sfxVolume)
+            .putString("capPreset", s.caption.preset.name)
+            .putFloat("capSize", s.caption.sizeScale)
+            .putString("capPos", s.caption.position.name)
+            .putFloat("enSharp", s.enhance.sharpness)
+            .putFloat("enContrast", s.enhance.contrast)
+            .putFloat("enColour", s.enhance.colour)
             .apply()
     }
 }
