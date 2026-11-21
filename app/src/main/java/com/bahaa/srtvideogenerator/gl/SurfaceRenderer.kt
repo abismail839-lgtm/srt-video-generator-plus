@@ -215,7 +215,7 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
             typeface = face; textSize = size; color = fillColor
         }
         val strokePaint = TextPaint(fillPaint).apply {
-            style = Paint.Style.STROKE; strokeWidth = size * strokeFactor; color = Color.BLACK
+            this.style = Paint.Style.STROKE; strokeWidth = size * strokeFactor; color = Color.BLACK
             strokeJoin = Paint.Join.ROUND
         }
         fun layout(p: TextPaint) = StaticLayout.Builder.obtain(text, 0, text.length, p, maxW)
