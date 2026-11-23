@@ -17,6 +17,7 @@ import android.provider.MediaStore
 import com.bahaa.srtvideogenerator.audio.AudioMixer
 import com.bahaa.srtvideogenerator.gl.EglCore
 import com.bahaa.srtvideogenerator.gl.GlTexture
+import com.bahaa.srtvideogenerator.gl.PopLayer
 import com.bahaa.srtvideogenerator.gl.SurfaceRenderer
 import java.io.File
 import java.nio.ByteBuffer
@@ -57,7 +58,7 @@ class NativeMediaGenerator(private val context: Context) {
 
             onProgress(0.75f, "Mixing audio…")
             val mixed = try {
-                AudioMixer(context).mix(req.audio, timeline, audioFile, voiceUs, req.images.map { it.sfx }, req.images.map { it.ambience }, cancelled) {
+                AudioMixer(context).mix(req.audio, timeline, audioFile, voiceUs, req.images.map { it.sfx }, req.images.map { it.ambience }, req.images.map { it.pops }, cancelled) {
                     onProgress(0.75f + it * 0.2f, "Mixing audio…")
                 }
             } catch (e: InterruptedException) { throw Cancelled() }
@@ -104,6 +105,7 @@ class NativeMediaGenerator(private val context: Context) {
 
         var egl: EglCore? = null
         var renderer: SurfaceRenderer? = null
+        var pops: PopLayer? = null
         val textures = HashMap<Int, GlTexture>()
         val clips = HashMap<Int, VideoClip>()
         val clipKey = HashMap<Int, Long>()
@@ -117,6 +119,8 @@ class NativeMediaGenerator(private val context: Context) {
                 it.setEnhance(req.enhance.sharpness, req.enhance.contrast, req.enhance.colour)
             }
             renderer = r
+            val popLayer = PopLayer(context, r, w, h)
+            pops = popLayer
 
             fun tex(i: Int): GlTexture = textures.getOrPut(i) {
                 val bmp = decodeBitmap(req.images[i].uri, max(w, h))
@@ -159,6 +163,8 @@ class NativeMediaGenerator(private val context: Context) {
                     )
                     drawSceneOverlay(r, req, timeline, from, t, 1f - p)
                     drawSceneOverlay(r, req, timeline, to, t, p)
+                    popLayer.drawScene(req.images[from].pops, (t - timeline.scenes[from].startUs) / 1_000_000f, 1f - p)
+                    popLayer.drawScene(req.images[to].pops, (t - timeline.scenes[to].startUs) / 1_000_000f, p)
                 } else {
                     val s = timeline.sceneAt(t)
                     keepLow = s
@@ -166,6 +172,7 @@ class NativeMediaGenerator(private val context: Context) {
                     val m = motion(req, timeline, s, t)
                     r.draw(null, tex(s), 1f, 0, 1f, m[0], timeSec, 0f, 0f, m[1], m[2])
                     drawSceneOverlay(r, req, timeline, s, t, 1f)
+                    popLayer.drawScene(req.images[s].pops, (t - timeline.scenes[s].startUs) / 1_000_000f, 1f)
                 }
                 // free textures we will not need again
                 val iter = textures.entries.iterator()
@@ -190,6 +197,7 @@ class NativeMediaGenerator(private val context: Context) {
             drain.drain(true)
         } finally {
             clips.values.forEach { it.close() }
+            try { pops?.release() } catch (_: Exception) {}
             try { renderer?.release() } catch (_: Exception) {}
             egl?.release()
             try { encoder.stop() } catch (_: Exception) {}

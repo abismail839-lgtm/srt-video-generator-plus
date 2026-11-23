@@ -4,6 +4,8 @@ import android.content.Context
 import com.bahaa.srtvideogenerator.AmbienceSettings
 import com.bahaa.srtvideogenerator.AmbienceType
 import com.bahaa.srtvideogenerator.AudioSettings
+import com.bahaa.srtvideogenerator.PopItem
+import com.bahaa.srtvideogenerator.PopKind
 import com.bahaa.srtvideogenerator.SfxChoice
 import com.bahaa.srtvideogenerator.Timeline
 import android.net.Uri
@@ -40,13 +42,15 @@ class AudioMixer(private val context: Context) {
         voiceUs: Long,
         perImageSfx: List<SfxChoice?>,
         ambience: List<AmbienceSettings>,
+        pops: List<List<PopItem>>,
         cancelled: () -> Boolean,
         onProgress: (Float) -> Unit
     ): File? {
-        if (!hasAnyAudio(a, timeline) && ambience.none { it.type != AmbienceType.NONE }) return null
+        if (!hasAnyAudio(a, timeline) && ambience.none { it.type != AmbienceType.NONE } &&
+            pops.none { l -> l.any { it.sound != SfxChoice.NONE } }) return null
 
         val totalFrames = timeline.totalUs * TARGET_RATE / 1_000_000L
-        val events = if (a.sfxEnabled) planSfx(a, timeline, perImageSfx) else emptyList()
+        val events = (if (a.sfxEnabled) planSfx(a, timeline, perImageSfx) else emptyList()) + planPops(timeline, pops)
         val ambEvents = planAmbience(timeline, ambience, totalFrames)
 
         var voice: DecodedAudioSource? = null
@@ -176,6 +180,32 @@ class AudioMixer(private val context: Context) {
             events += SfxEvent(startFrame, clip, a.sfxVolume)
         }
         return events
+    }
+
+    /** One sound at the start of every pop text / picture that has a sound. */
+    private fun planPops(timeline: Timeline, pops: List<List<PopItem>>): List<SfxEvent> {
+        val builtIn = HashMap<SfxChoice, FloatArray>()
+        val custom = HashMap<Uri, FloatArray>()
+        val out = ArrayList<SfxEvent>()
+        for ((i, list) in pops.withIndex()) {
+            if (i >= timeline.scenes.size) continue
+            for (p in list) {
+                if (p.sound == SfxChoice.NONE) continue
+                val choice = if (p.sound == SfxChoice.AUTO) SfxChoice.POP else p.sound
+                var clip: FloatArray = if (choice == SfxChoice.CUSTOM) {
+                    val u = p.soundUri ?: continue
+                    custom.getOrPut(u) { DecodedAudioSource.decodeAll(context, u) }
+                } else builtIn.getOrPut(choice) { SfxSynth.generate(choice) }
+                if (choice == SfxChoice.TYPEWRITER && p.kind == PopKind.TEXT) {
+                    val frames = minOf(clip.size / 2, (p.text.length * 0.06f * TARGET_RATE).toInt() + 1200)
+                    clip = clip.copyOf(frames.coerceAtLeast(1) * 2)
+                }
+                val startUs = timeline.scenes[i].startUs + (p.startSec * 1_000_000L).toLong() -
+                    (SfxSynth.leadSeconds(choice) * 1_000_000L).toLong()
+                out += SfxEvent((startUs * TARGET_RATE / 1_000_000L).coerceAtLeast(0), clip, p.soundVolume)
+            }
+        }
+        return out
     }
 
     private fun planAmbience(timeline: Timeline, ambience: List<AmbienceSettings>, totalFrames: Long): List<AmbEvent> {

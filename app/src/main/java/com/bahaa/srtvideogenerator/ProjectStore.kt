@@ -81,6 +81,21 @@ class ProjectStore(context: Context) {
                     a.customName?.let { put("n", it) }
                 })
             }
+            if (im.pops.isNotEmpty()) {
+                val pa = JSONArray()
+                for (p in im.pops) {
+                    pa.put(JSONObject().put("id", p.id).put("k", p.kind.name).put("text", p.text).put("st", p.style.name)
+                        .put("an", p.anim.name).put("s", p.startSec.toDouble()).put("d", p.durSec.toDouble())
+                        .put("x", p.x.toDouble()).put("y", p.y.toDouble()).put("z", p.size.toDouble())
+                        .put("r", p.rotation.toDouble()).put("c", p.color).put("snd", p.sound.name)
+                        .put("sv", p.soundVolume.toDouble()).apply {
+                            p.imageUri?.let { put("iu", it.toString()) }
+                            p.imageName?.let { put("in", it) }
+                            p.soundUri?.let { put("su", it.toString()) }
+                        })
+                }
+                j.put("pops", pa)
+            }
             arr.put(j)
         }
         o.put("images", arr)
@@ -94,10 +109,26 @@ class ProjectStore(context: Context) {
             val j = arr.getJSONObject(k)
             val fx = j.optJSONObject("fx")
             val amb = j.optJSONObject("amb")
+            val popArr = j.optJSONArray("pops")
+            val pops = ArrayList<PopItem>()
+            if (popArr != null) for (q in 0 until popArr.length()) {
+                val p = popArr.getJSONObject(q)
+                pops += PopItem(
+                    id = p.optLong("id", q.toLong()), kind = p.getEnum("k", PopKind.TEXT), text = p.optString("text", ""),
+                    style = p.getEnum("st", PopStyle.PLAIN), imageUri = p.getUri("iu"), imageName = p.getStr("in"),
+                    anim = p.getEnum("an", PopAnim.BOUNCE), startSec = p.optDouble("s", 0.5).toFloat(),
+                    durSec = p.optDouble("d", 2.5).toFloat(), x = p.optDouble("x", 0.5).toFloat(),
+                    y = p.optDouble("y", 0.5).toFloat(), size = p.optDouble("z", 1.0).toFloat(),
+                    rotation = p.optDouble("r", 0.0).toFloat(), color = p.optInt("c", 0),
+                    sound = p.getEnum("snd", SfxChoice.POP), soundVolume = p.optDouble("sv", 0.25).toFloat(),
+                    soundUri = p.getUri("su")
+                )
+            }
             list += ImageItem(
                 uri = Uri.parse(j.getString("uri")),
                 name = j.optString("name", "image"),
                 isVideo = j.optBoolean("video", false),
+                pops = pops,
                 transition = j.getStr("tr")?.let { try { enumValueOf<TransitionType>(it) } catch (_: Exception) { null } },
                 sfx = j.getStr("sfx")?.let { try { enumValueOf<SfxChoice>(it) } catch (_: Exception) { null } },
                 effect = if (fx == null) EffectSettings() else EffectSettings(

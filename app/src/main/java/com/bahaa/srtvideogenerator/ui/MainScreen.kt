@@ -79,6 +79,11 @@ import com.bahaa.srtvideogenerator.EffectType
 import com.bahaa.srtvideogenerator.EnhanceSettings
 import com.bahaa.srtvideogenerator.MainViewModel
 import com.bahaa.srtvideogenerator.UiState
+import com.bahaa.srtvideogenerator.PopAnim
+import com.bahaa.srtvideogenerator.PopItem
+import com.bahaa.srtvideogenerator.PopKind
+import com.bahaa.srtvideogenerator.PopStyle
+import java.util.Locale
 import com.bahaa.srtvideogenerator.Resolution
 import com.bahaa.srtvideogenerator.SfxChoice
 import com.bahaa.srtvideogenerator.TransitionType
@@ -115,6 +120,17 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     var ambienceIndex by remember { mutableStateOf<Int?>(null) }
     var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     var selected by rememberSaveable { mutableStateOf(0) }
+    var popEdit by remember { mutableStateOf<Pair<Int, PopItem>?>(null) }
+    var pickForScene by remember { mutableStateOf(0) }
+    val popImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            vm.grantRead(uri)
+            popEdit = pickForScene to PopItem(
+                id = System.nanoTime(), kind = PopKind.IMAGE, imageUri = uri, imageName = displayName(ctx, uri),
+                size = 0.35f, startSec = 0.5f, durSec = 2.5f
+            )
+        }
+    }
     var applyAllEffect by remember { mutableStateOf<EffectSettings?>(null) }
     var applyAllAmbience by remember { mutableStateOf<AmbienceSettings?>(null) }
 
@@ -210,7 +226,12 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                     onEffect = { effectIndex = it },
                     onAmbience = { ambienceIndex = it },
                     onPreview = { previewIndex = it },
-                    onConfirm = { msg, action -> confirm = msg to action }
+                    onConfirm = { msg, action -> confirm = msg to action },
+                    onAddPopText = { idx ->
+                        popEdit = idx to PopItem(id = System.nanoTime(), kind = PopKind.TEXT, text = "Your text", size = 1f)
+                    },
+                    onAddPopImage = { idx -> pickForScene = idx; popImagePicker.launch(arrayOf("image/*")) },
+                    onEditPop = { idx, pop -> popEdit = idx to pop }
                 )
             }
         }
@@ -323,6 +344,9 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         AmbienceDialog(vm, i, onAll = { applyAllAmbience = it }) { ambienceIndex = null }
     }
 
+    popEdit?.let { (scene, item) ->
+        PopDialog(vm, scene, item) { popEdit = null }
+    }
     confirm?.let { (msg, action) ->
         AlertDialog(
             onDismissRequest = { confirm = null },
@@ -613,7 +637,8 @@ private fun SceneStrip(s: UiState, selected: Int, onSelect: (Int) -> Unit) {
                     Thumb(img.uri, 92.dp)
                     val marks = (if (img.effect.type != EffectType.NONE) "✨" else "") +
                         (if (img.ambience.type != AmbienceType.NONE) "🎧" else "") +
-                        (if (img.transition != null) "↔" else "") + (if (img.sfx != null) "♪" else "")
+                        (if (img.transition != null) "↔" else "") + (if (img.sfx != null) "♪" else "") +
+                        (if (img.pops.isNotEmpty()) "💬" else "")
                     Text("${i + 1}${if (img.isVideo) " 🎬" else ""}", style = MaterialTheme.typography.labelMedium)
                     Text(
                         (s.sceneSecs.getOrNull(i)?.let { "%.1fs".format(it) } ?: "") + " " + marks,
@@ -622,7 +647,7 @@ private fun SceneStrip(s: UiState, selected: Int, onSelect: (Int) -> Unit) {
                 }
             }
         }
-        Text("✨ effect   🎧 scene sound   ↔ own transition   ♪ own sound", style = MaterialTheme.typography.bodySmall)
+        Text("✨ effect   🎧 scene sound   ↔ own transition   ♪ own sound   💬 pop", style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -630,7 +655,8 @@ private fun SceneStrip(s: UiState, selected: Int, onSelect: (Int) -> Unit) {
 private fun SceneEditor(
     vm: MainViewModel, s: UiState, index: Int,
     onSelect: (Int) -> Unit, onEffect: (Int) -> Unit, onAmbience: (Int) -> Unit, onPreview: (Int) -> Unit,
-    onConfirm: (String, () -> Unit) -> Unit
+    onConfirm: (String, () -> Unit) -> Unit,
+    onAddPopText: (Int) -> Unit, onAddPopImage: (Int) -> Unit, onEditPop: (Int, PopItem) -> Unit
 ) {
     val img = s.images[index]
     val ctx = LocalContext.current
@@ -684,6 +710,24 @@ private fun SceneEditor(
             Text(if (img.ambience.type == AmbienceType.NONE) "Add scene sound" else "Scene sound: ${img.ambience.type.label}", maxLines = 1)
         }
 
+        // ---- pop text and pop pictures ----
+        Text("Pop text and pictures on this scene", style = MaterialTheme.typography.titleSmall)
+        img.pops.forEach { pop ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    (if (pop.kind == PopKind.TEXT) "💬 ${pop.text.take(22)}" else "🖼 ${pop.imageName ?: "picture"}") +
+                        "  @ ${String.format(Locale.US, "%.1f", pop.startSec)} s",
+                    modifier = Modifier.weight(1f), maxLines = 1, style = MaterialTheme.typography.bodyMedium
+                )
+                TextButton(onClick = { onEditPop(index, pop) }) { Text("Edit") }
+                TextButton(onClick = { onConfirm("Delete this pop from scene ${index + 1}? (you can Undo)") { vm.deletePop(index, pop.id) } }) { Text("Delete") }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { onAddPopText(index) }, modifier = Modifier.weight(1f)) { Text("+ Pop text") }
+            OutlinedButton(onClick = { onAddPopImage(index) }, modifier = Modifier.weight(1f)) { Text("+ Pop picture") }
+        }
+
         // ---- copy this scene's settings to other scenes ----
         var from by remember(index) { mutableStateOf((index + 2).coerceAtMost(s.images.size).toString()) }
         var to by remember(index) { mutableStateOf((index + 2).coerceAtMost(s.images.size).toString()) }
@@ -691,6 +735,7 @@ private fun SceneEditor(
         var cS by remember { mutableStateOf(true) }
         var cE by remember { mutableStateOf(true) }
         var cA by remember { mutableStateOf(true) }
+        var cP by remember { mutableStateOf(true) }
         Text("Copy this scene's settings to other scenes", style = MaterialTheme.typography.titleSmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
@@ -706,6 +751,7 @@ private fun SceneEditor(
         Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cS, { cS = it }); Text("Transition sound") }
         Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cE, { cE = it }); Text("Effect") }
         Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cA, { cA = it }); Text("Scene sound") }
+        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cP, { cP = it }); Text("Pop text and pictures") }
         Button(onClick = {
             val a = ((from.toIntOrNull() ?: 1).coerceIn(1, s.images.size)) - 1
             val z = ((to.toIntOrNull() ?: a + 1).coerceIn(1, s.images.size)) - 1
@@ -716,6 +762,7 @@ private fun SceneEditor(
                 if (cS) add(MainViewModel.CopyPart.SOUND)
                 if (cE) add(MainViewModel.CopyPart.EFFECT)
                 if (cA) add(MainViewModel.CopyPart.SCENE_SOUND)
+                if (cP) add(MainViewModel.CopyPart.POPS)
             }
             if (parts.isNotEmpty()) {
                 onConfirm("Copy the chosen settings of scene ${index + 1} onto scenes ${first + 1} to ${last + 1}? This replaces what those scenes have now (you can Undo).") {
@@ -724,4 +771,119 @@ private fun SceneEditor(
             }
         }, modifier = Modifier.fillMaxWidth()) { Text("Copy to these scenes") }
     }
+}
+
+
+// ---------------------------------------------------------------- pop editor
+
+private val POP_COLOURS = listOf(
+    "Style default" to 0,
+    "White" to 0xFFFFFFFF.toInt(),
+    "Yellow" to 0xFFFFD400.toInt(),
+    "Red" to 0xFFD42020.toInt(),
+    "Orange" to 0xFFFF8A1E.toInt(),
+    "Cyan" to 0xFF30D5F0.toInt(),
+    "Green" to 0xFF3CC85A.toInt(),
+    "Black" to 0xFF000000.toInt()
+)
+
+@Composable
+private fun PopDialog(vm: MainViewModel, scene: Int, initial: PopItem, onClose: () -> Unit) {
+    val s by vm.state.collectAsState()
+    val ctx = LocalContext.current
+    if (scene !in s.images.indices) { onClose(); return }
+    val img = s.images[scene]
+    var p by remember { mutableStateOf(initial) }
+    var startTxt by remember { mutableStateOf(String.format(Locale.US, "%.1f", initial.startSec)) }
+    var durTxt by remember { mutableStateOf(String.format(Locale.US, "%.1f", initial.durSec)) }
+    val params = remember { PopPreviewParams() }
+    params.item = p
+    val bg by produceState<Bitmap?>(null, img.uri) {
+        value = withContext(Dispatchers.IO) { try { BitmapLoader.decode(ctx, img.uri, 640) } catch (_: Exception) { null } }
+    }
+    val imgPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { vm.grantRead(uri); p = p.copy(imageUri = uri, imageName = displayName(ctx, uri)) }
+    }
+    val sndPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { vm.grantRead(uri); p = p.copy(sound = SfxChoice.CUSTOM, soundUri = uri) }
+    }
+    fun num(t: String): Float? = t.replace(',', '.').toFloatOrNull()
+    val sceneLen = s.sceneSecs.getOrNull(scene)
+
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(if (p.kind == PopKind.TEXT) "Pop text (scene ${scene + 1})" else "Pop picture (scene ${scene + 1})") },
+        confirmButton = { TextButton(onClick = { vm.upsertPop(scene, p); onClose() }) { Text("Done") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val b = bg
+                if (b == null) Text("Loading preview…")
+                else AndroidView(
+                    factory = { PopPreviewView(it, b, params) },
+                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                )
+                Text("The preview repeats and shows exactly how it will look.", style = MaterialTheme.typography.bodySmall)
+
+                if (p.kind == PopKind.TEXT) {
+                    OutlinedTextField(
+                        value = p.text, onValueChange = { p = p.copy(text = it) }, label = { Text("Type your text") },
+                        minLines = 2, modifier = Modifier.fillMaxWidth()
+                    )
+                    Dropdown("Style", p.style.label, PopStyle.entries, { it.label }) { p = p.copy(style = it) }
+                    Dropdown("Colour", POP_COLOURS.firstOrNull { it.second == p.color }?.first ?: "Custom", POP_COLOURS, { it.first }) {
+                        p = p.copy(color = it.second)
+                    }
+                    LabeledSlider("Text size", "${(p.size * 100).roundToInt()}%", p.size, 0.3f..3f) { p = p.copy(size = (it * 20).roundToInt() / 20f) }
+                } else {
+                    Text("Picture: ${p.imageName ?: "none"}", maxLines = 1)
+                    OutlinedButton(onClick = { imgPicker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth()) { Text("Change picture") }
+                    LabeledSlider("Picture size", "${(p.size * 100).roundToInt()}%", p.size, 0.05f..1f) { p = p.copy(size = (it * 100).roundToInt() / 100f) }
+                }
+
+                Dropdown("Animation", p.anim.label, PopAnim.entries.filter { it != PopAnim.TYPEWRITER || p.kind == PopKind.TEXT }, { it.label }) {
+                    p = p.copy(anim = it)
+                }
+
+                Text(
+                    "Timing (seconds counted from the start of this scene" + (sceneLen?.let { ", the scene is ${String.format(Locale.US, "%.1f", it)} s long" } ?: "") + ")",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = startTxt, onValueChange = { t -> startTxt = t.filter { it.isDigit() || it == '.' || it == ',' }.take(6); num(startTxt)?.let { p = p.copy(startSec = it.coerceAtLeast(0f)) } },
+                        label = { Text("Appears at (s)") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = durTxt, onValueChange = { t -> durTxt = t.filter { it.isDigit() || it == '.' || it == ',' }.take(6); num(durTxt)?.let { p = p.copy(durSec = it.coerceAtLeast(0.3f)) } },
+                        label = { Text("Stays for (s)") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Text("Position", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TextButton(onClick = { p = p.copy(x = 0.5f, y = 0.14f) }) { Text("Top") }
+                    TextButton(onClick = { p = p.copy(x = 0.5f, y = 0.5f) }) { Text("Centre") }
+                    TextButton(onClick = { p = p.copy(x = 0.5f, y = 0.84f) }) { Text("Bottom") }
+                }
+                LabeledSlider("Left to right", "${(p.x * 100).roundToInt()}%", p.x, 0f..1f) { p = p.copy(x = (it * 100).roundToInt() / 100f) }
+                LabeledSlider("Up to down", "${(p.y * 100).roundToInt()}%", p.y, 0f..1f) { p = p.copy(y = (it * 100).roundToInt() / 100f) }
+                LabeledSlider("Tilt", "${p.rotation.roundToInt()}°", p.rotation, -45f..45f) { p = p.copy(rotation = it.roundToInt().toFloat()) }
+
+                Text("Sound when it pops", style = MaterialTheme.typography.titleSmall)
+                Dropdown(
+                    "Sound", p.sound.label,
+                    SfxChoice.entries.filter { it != SfxChoice.AUTO && (it != SfxChoice.CUSTOM || p.soundUri != null) }, { it.label }
+                ) { p = p.copy(sound = it) }
+                OutlinedButton(onClick = { sndPicker.launch(arrayOf("audio/*")) }, modifier = Modifier.fillMaxWidth()) { Text("Choose my own sound file") }
+                if (p.sound != SfxChoice.NONE) {
+                    LabeledSlider("Sound volume", "${(p.soundVolume * 100).roundToInt()}%", p.soundVolume, 0f..1f) {
+                        p = p.copy(soundVolume = (it * 100).roundToInt() / 100f)
+                    }
+                }
+            }
+        }
+    )
 }

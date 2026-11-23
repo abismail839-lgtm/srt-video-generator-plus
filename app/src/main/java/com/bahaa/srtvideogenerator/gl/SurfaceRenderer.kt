@@ -30,6 +30,8 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
     private var transProgram = 0
     private var capProgram = 0
     private var ovProgram = 0
+    private var popProgram = 0
+    private val popCache = HashMap<String, Int>()
     private val ovCache = HashMap<String, Int>()
 
     private var sharp = 0f
@@ -50,6 +52,29 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
         transProgram = link(VERTEX, TRANSITION_FRAGMENT)
         capProgram = link(VERTEX, CAPTION_FRAGMENT)
         ovProgram = link(VERTEX, OVERLAY_FRAGMENT)
+        popProgram = link(POP_VERTEX, POP_FRAGMENT)
+    }
+
+    /**
+     * Draws a pop picture: [cx], [cy] = centre in NDC, [wPx] x [hPx] = size in output pixels,
+     * [rot] = radians counter-clockwise, premultiplied-alpha texture.
+     */
+    fun drawPop(tex: GlTexture, cx: Float, cy: Float, wPx: Float, hPx: Float, rot: Float, alpha: Float) {
+        GLES20.glViewport(0, 0, width, height)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glUseProgram(popProgram)
+        fun u(name: String) = popCache.getOrPut(name) { GLES20.glGetUniformLocation(popProgram, name) }
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex.id)
+        GLES20.glUniform1i(u("uTex"), 0)
+        GLES20.glUniform2f(u("uCenter"), cx, cy)
+        GLES20.glUniform2f(u("uSizePx"), wPx, hPx)
+        GLES20.glUniform2f(u("uView"), width.toFloat(), height.toFloat())
+        GLES20.glUniform1f(u("uRot"), rot)
+        GLES20.glUniform1f(u("uAlpha"), alpha.coerceIn(0f, 1f))
+        drawQuad(popProgram)
+        GLES20.glDisable(GLES20.GL_BLEND)
     }
 
     /** Sharpen / contrast / colour applied to every picture. 0 / 1 / 1 = off. */
@@ -299,9 +324,11 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
         if (transProgram != 0) GLES20.glDeleteProgram(transProgram)
         if (capProgram != 0) GLES20.glDeleteProgram(capProgram)
         if (ovProgram != 0) GLES20.glDeleteProgram(ovProgram)
+        if (popProgram != 0) GLES20.glDeleteProgram(popProgram)
         transProgram = 0
         capProgram = 0
         ovProgram = 0
+        popProgram = 0
     }
 
     private companion object {
@@ -333,6 +360,34 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
 
         // Effect ids == EffectType.ordinal: 1 white edge, 2 snow, 3 rain, 4 dust, 5 embers,
         // 6 old film, 7 vignette, 8 glow edge, 9 flash pulses. Output is premultiplied alpha.
+        const val POP_VERTEX = """
+            attribute vec2 aPos;
+            uniform vec2 uCenter;
+            uniform vec2 uSizePx;
+            uniform vec2 uView;
+            uniform float uRot;
+            varying vec2 vUv;
+            void main() {
+                vUv = aPos;
+                vec2 p = (aPos - 0.5) * uSizePx;
+                p.y = -p.y;
+                float c = cos(uRot);
+                float s = sin(uRot);
+                p = vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+                gl_Position = vec4(uCenter + p / (uView * 0.5), 0.0, 1.0);
+            }
+        """
+
+        const val POP_FRAGMENT = """
+            precision mediump float;
+            varying vec2 vUv;
+            uniform sampler2D uTex;
+            uniform float uAlpha;
+            void main() {
+                gl_FragColor = texture2D(uTex, vUv) * uAlpha;
+            }
+        """
+
         const val OVERLAY_FRAGMENT = """
             precision highp float;
             varying vec2 vUv;

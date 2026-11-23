@@ -26,6 +26,7 @@ object SfxSynth {
         SfxChoice.POP -> 0.03f
         SfxChoice.ZAP -> 0.10f
         SfxChoice.PAGE -> 0.20f
+        SfxChoice.DING, SfxChoice.STAMP, SfxChoice.TYPEWRITER -> 0.0f
         else -> 0.10f
     }
 
@@ -49,6 +50,9 @@ object SfxSynth {
         SfxChoice.ZAP -> zap()
         SfxChoice.PAGE -> page()
         SfxChoice.BOOM -> boom()
+        SfxChoice.DING -> ding()
+        SfxChoice.STAMP -> stamp()
+        SfxChoice.TYPEWRITER -> typewriter()
         else -> error("Not a built-in sound: $choice")
     }
 
@@ -191,6 +195,55 @@ object SfxSynth {
             phase += 2.0 * PI * freq / TARGET_RATE
             lp += 0.03 * (rnd.nextGaussian() - lp)
             mono[i] = (sin(phase) * exp(-t * 2.2) + lp * 4.0 * exp(-t * 3.0)).toFloat()
+        }
+        return stereo(mono)
+    }
+
+    /** Bright bell ding. */
+    private fun ding(): FloatArray {
+        val n = (1.0f * TARGET_RATE).toInt()
+        val mono = FloatArray(n)
+        for (i in 0 until n) {
+            val t = i.toDouble() / TARGET_RATE
+            mono[i] = (sin(2.0 * PI * 1318.5 * t) * exp(-t * 5.0) +
+                0.5 * sin(2.0 * PI * 2637.0 * t) * exp(-t * 8.0) +
+                0.25 * sin(2.0 * PI * 3951.0 * t) * exp(-t * 12.0)).toFloat()
+        }
+        return stereo(mono)
+    }
+
+    /** Rubber stamp thud. */
+    private fun stamp(): FloatArray {
+        val n = (0.4f * TARGET_RATE).toInt()
+        val rnd = Random(9)
+        val mono = FloatArray(n)
+        var phase = 0.0
+        var lp = 0.0
+        for (i in 0 until n) {
+            val t = i.toDouble() / TARGET_RATE
+            phase += 2.0 * PI * (70.0 + 110.0 * exp(-t * 45.0)) / TARGET_RATE
+            lp += 0.25 * (rnd.nextGaussian() - lp)
+            mono[i] = (sin(phase) * exp(-t * 13.0) + lp * 0.9 * exp(-t * 40.0)).toFloat()
+        }
+        return stereo(mono)
+    }
+
+    /** About 3 seconds of typewriter keys; the mixer cuts it to the length of the typing. */
+    private fun typewriter(): FloatArray {
+        val n = (3.0f * TARGET_RATE).toInt()
+        val rnd = Random(10)
+        val mono = FloatArray(n)
+        val step = (0.06f * TARGET_RATE).toInt()
+        var at = 0
+        while (at + 400 < n) {
+            val amp = 0.6 + rnd.nextDouble() * 0.4
+            val pitch = 1400.0 + rnd.nextDouble() * 900.0
+            for (k in 0 until 400) {
+                val t = k.toDouble() / TARGET_RATE
+                val e = exp(-k / 45.0)
+                mono[at + k] += ((rnd.nextGaussian() * 0.6 + sin(2.0 * PI * pitch * t) * 0.5) * e * amp).toFloat()
+            }
+            at += step + rnd.nextInt(step / 3 + 1) - step / 6
         }
         return stereo(mono)
     }

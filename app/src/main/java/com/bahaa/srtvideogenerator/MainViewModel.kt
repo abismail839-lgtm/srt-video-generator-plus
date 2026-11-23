@@ -404,8 +404,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { s -> s.copy(images = s.images.map { it.copy(transition = null) }) }
     }
 
+    /** Adds a pop item to a scene, or replaces the one with the same id. */
+    fun upsertPop(scene: Int, pop: PopItem) {
+        pushUndo()
+        _state.update { s ->
+            s.copy(images = s.images.mapIndexed { i, im ->
+                if (i != scene) im else {
+                    val has = im.pops.any { it.id == pop.id }
+                    im.copy(pops = if (has) im.pops.map { if (it.id == pop.id) pop else it } else im.pops + pop)
+                }
+            })
+        }
+    }
+
+    fun deletePop(scene: Int, id: Long) {
+        pushUndo()
+        _state.update { s ->
+            s.copy(images = s.images.mapIndexed { i, im -> if (i == scene) im.copy(pops = im.pops.filter { it.id != id }) else im })
+        }
+    }
+
     /** Parts of a scene that can be copied to other scenes. */
-    enum class CopyPart { TRANSITION, SOUND, EFFECT, SCENE_SOUND }
+    enum class CopyPart { TRANSITION, SOUND, EFFECT, SCENE_SOUND, POPS }
 
     /** Copies the chosen settings of scene [from] onto scenes [first]..[last] (all 0-based, inclusive). */
     fun copySceneSettings(from: Int, first: Int, last: Int, parts: Set<CopyPart>) {
@@ -419,6 +439,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (CopyPart.SOUND in parts) n = n.copy(sfx = src.sfx)
                     if (CopyPart.EFFECT in parts) n = n.copy(effect = src.effect)
                     if (CopyPart.SCENE_SOUND in parts) n = n.copy(ambience = src.ambience)
+                    if (CopyPart.POPS in parts) n = n.copy(pops = src.pops)
                     n
                 }
             })

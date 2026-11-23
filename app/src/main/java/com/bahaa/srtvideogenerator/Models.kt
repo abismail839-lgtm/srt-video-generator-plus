@@ -50,6 +50,9 @@ enum class SfxChoice(val label: String) {
     ZAP("Zap"),
     PAGE("Page turn"),
     BOOM("Deep boom"),
+    DING("Ding"),
+    STAMP("Stamp thud"),
+    TYPEWRITER("Typewriter"),
     CUSTOM("My own sound file"),
     NONE("No sound")
 }
@@ -128,6 +131,54 @@ data class AmbienceSettings(
     val customName: String? = null
 )
 
+enum class PopKind { TEXT, IMAGE }
+
+enum class PopAnim(val label: String) {
+    BOUNCE("Bounce pop"),
+    ZOOM("Zoom in"),
+    SLIDE_UP("Slide up"),
+    SLIDE_SIDE("Slide in from the side"),
+    WOBBLE("Pop and wobble"),
+    FADE("Fade in"),
+    TYPEWRITER("Typewriter (text only)")
+}
+
+enum class PopStyle(val label: String) {
+    PLAIN("Plain white"),
+    BOLD_YELLOW("Bold yellow"),
+    SCRIPT("Handwriting"),
+    DATE_LABEL("Date label (parchment)"),
+    STAMP_RED("Red stamp"),
+    NAME_TAG("Name tag (lower third)"),
+    HIGHLIGHTER("Highlighter")
+}
+
+/**
+ * A pop-in text or picture on one scene. [startSec] and [durSec] are seconds counted from the start of
+ * the scene. [x] / [y] are the centre as a fraction of the frame (y from the top). For text [size] is a
+ * multiplier (1 = normal); for pictures it is the width as a fraction of the frame width.
+ * [color] 0 = the style's own colour. [sound] NONE = silent (AUTO is treated as Pop).
+ */
+data class PopItem(
+    val id: Long,
+    val kind: PopKind,
+    val text: String = "",
+    val style: PopStyle = PopStyle.PLAIN,
+    val imageUri: Uri? = null,
+    val imageName: String? = null,
+    val anim: PopAnim = PopAnim.BOUNCE,
+    val startSec: Float = 0.5f,
+    val durSec: Float = 2.5f,
+    val x: Float = 0.5f,
+    val y: Float = 0.5f,
+    val size: Float = 1f,
+    val rotation: Float = 0f,
+    val color: Int = 0,
+    val sound: SfxChoice = SfxChoice.POP,
+    val soundVolume: Float = 0.25f,
+    val soundUri: Uri? = null
+)
+
 data class ImageItem(
     val uri: Uri,
     val name: String,
@@ -138,7 +189,8 @@ data class ImageItem(
     val effect: EffectSettings = EffectSettings(),
     val ambience: AmbienceSettings = AmbienceSettings(),
     /** An animated clip instead of a still picture (its own sound is not used). */
-    val isVideo: Boolean = false
+    val isVideo: Boolean = false,
+    val pops: List<PopItem> = emptyList()
 )
 
 data class TransitionSettings(

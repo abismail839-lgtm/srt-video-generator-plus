@@ -44,3 +44,8 @@ If the build fails, copy the red error lines from the Actions log and send them 
 - Scenes are a horizontal strip of thumbnails (scroll sideways), with "go to scene number".
 - Tap a scene to edit it in one panel: live preview with its effect, transition, transition sound, scene sound, effect, voice-over play, back/next.
 - Copy a scene's settings to a range of scenes (choose which parts), with a confirmation and Undo.
+
+## Update 5.0 (Upgrade C: pop text and pictures)
+- Per scene: pop text (typed in the app: style, colour, size) and pop pictures (from the gallery), with animation, exact start second and duration, position, tilt, and a pop sound (built-in or own file), all with a live preview.
+- New sounds: ding, stamp thud, typewriter.
+- Pop items are saved with the project and can be copied to other scenes.
