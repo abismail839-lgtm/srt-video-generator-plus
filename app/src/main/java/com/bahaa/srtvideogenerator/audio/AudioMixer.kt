@@ -43,6 +43,7 @@ class AudioMixer(private val context: Context) {
         perImageSfx: List<SfxChoice?>,
         ambience: List<AmbienceSettings>,
         pops: List<List<PopItem>>,
+        voiceOffsetUs: Long,
         cancelled: () -> Boolean,
         onProgress: (Float) -> Unit
     ): File? {
@@ -64,6 +65,18 @@ class AudioMixer(private val context: Context) {
             val chunk = 4096
             val vBuf = FloatArray(chunk * 2)
             val mBuf = FloatArray(chunk * 2)
+            val duckBuf = FloatArray(chunk)
+            var duckEnv = 0f
+            // test render: start the voice-over at the first scene instead of at 0
+            val voiceSrc = voice
+            if (voiceSrc != null && voiceOffsetUs > 0) {
+                var left = voiceOffsetUs * TARGET_RATE / 1_000_000L
+                while (left > 0) {
+                    val k = min(chunk.toLong(), left).toInt()
+                    voiceSrc.read(vBuf, k)
+                    left -= k
+                }
+            }
             val fadeInFrames = (a.musicFadeInSec * TARGET_RATE).toLong().coerceAtLeast(0)
             val fadeOutFrames = (a.musicFadeOutSec * TARGET_RATE).toLong().coerceAtLeast(0)
 
@@ -75,11 +88,23 @@ class AudioMixer(private val context: Context) {
                     for (i in 0 until n * 2) dst[i] += vBuf[i] * a.voiceVolume * voiceGain
                 }
 
+                // how much to lower music and scene sounds right now (follows the voice level)
+                val duckOn = a.duck && voice != null
+                for (i in 0 until n) {
+                    var g = 1f
+                    if (duckOn) {
+                        val lvl = (abs(vBuf[2 * i]) + abs(vBuf[2 * i + 1])) * 0.5f * a.voiceVolume * voiceGain
+                        duckEnv += (lvl - duckEnv) * (if (lvl > duckEnv) 0.01f else 0.00005f)
+                        g = 1f - a.duckAmount * (duckEnv / 0.04f).coerceIn(0f, 1f)
+                    }
+                    duckBuf[i] = g
+                }
+
                 music?.let { m ->
                     m.read(mBuf, n)
                     for (i in 0 until n) {
                         val pos = start + i
-                        var g = a.musicVolume
+                        var g = a.musicVolume * duckBuf[i]
                         if (fadeInFrames > 0 && pos < fadeInFrames) g *= pos / fadeInFrames.toFloat()
                         val left = totalFrames - pos
                         if (fadeOutFrames > 0 && left < fadeOutFrames) g *= left / fadeOutFrames.toFloat()
@@ -111,7 +136,7 @@ class AudioMixer(private val context: Context) {
                     for (pos in from until to) {
                         val ci = (((pos - ev.startFrame) % clipFrames) * 2).toInt()
                         val di = ((pos - start) * 2).toInt()
-                        val g = ev.gain *
+                        val g = ev.gain * duckBuf[(pos - start).toInt()] *
                             minOf(1f, (pos - ev.startFrame) / fade.toFloat()) *
                             minOf(1f, (ev.endFrame - pos) / fade.toFloat())
                         dst[di] += ev.clip[ci] * g

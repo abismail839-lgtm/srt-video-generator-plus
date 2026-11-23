@@ -43,6 +43,8 @@ data class UiState(
     val sceneSecs: List<Float> = emptyList(),
     val totalSecs: Float = 0f,
     val undoCount: Int = 0,
+    val watermark: WatermarkSettings = WatermarkSettings(),
+    val notice: String? = null,
     val rendering: Boolean = false,
     val progress: Float = 0f,
     val status: String = "",
@@ -127,7 +129,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 resolution = saved.resolution, fps = saved.fps, zoomMode = saved.zoomMode,
                 showSubtitles = saved.showSubtitles, transitions = saved.transitions, audio = saved.audio,
-                caption = saved.caption, enhance = saved.enhance
+                caption = saved.caption, enhance = saved.enhance, watermark = saved.watermark
             )
         }
         // bring back the last project (pictures, files and every per-scene setting)
@@ -170,7 +172,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun save() {
         val s = _state.value
-        store.save(SavedSettings(s.resolution, s.fps, s.zoomMode, s.showSubtitles, s.transitions, s.audio, s.caption, s.enhance))
+        store.save(SavedSettings(s.resolution, s.fps, s.zoomMode, s.showSubtitles, s.transitions, s.audio, s.caption, s.enhance, s.watermark))
     }
 
     private fun persist(uri: Uri) {
@@ -306,6 +308,58 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setShowSubtitles(v: Boolean) { _state.update { it.copy(showSubtitles = v) }; save() }
     fun setTransitions(t: TransitionSettings) { _state.update { it.copy(transitions = t) }; save() }
     fun setAudio(a: AudioSettings) { _state.update { it.copy(audio = a) }; save() }
+    fun setWatermark(w: WatermarkSettings) { _state.update { it.copy(watermark = w) }; save() }
+
+    fun setWatermarkFile(uri: Uri?) {
+        uri?.let(::persist)
+        _state.update { it.copy(watermark = it.watermark.copy(uri = uri, name = uri?.let { u -> displayName(ctx, u) })) }
+        save()
+    }
+
+    // ---------------- project backup ----------------
+
+    fun exportProject(uri: Uri?) {
+        if (uri == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val s = _state.value
+                val text = projectStore.encode(
+                    ProjectData(
+                        s.images, s.imageSource, s.srtUri, s.srtName, s.wordSrtUri, s.wordSrtName,
+                        s.audio.voiceUri, s.voiceName, s.audio.musicUri, s.musicName, s.audio.sfxCustomUri, s.sfxName
+                    )
+                )
+                ctx.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) }
+                _state.update { it.copy(notice = "Backup saved (${s.images.size} scenes).") }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = "Could not save the backup: ${e.message}") }
+            }
+        }
+    }
+
+    fun importProject(uri: Uri?) {
+        if (uri == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val text = ctx.contentResolver.openInputStream(uri)!!.use { String(it.readBytes()) }
+                val p = projectStore.decode(text) ?: throw IllegalStateException("that file is not a project backup")
+                pushUndo()
+                _state.update {
+                    it.copy(
+                        images = p.images, imageSource = p.imageSource,
+                        srtUri = p.srtUri, srtName = p.srtName, wordSrtUri = p.wordSrtUri, wordSrtName = p.wordSrtName,
+                        voiceName = p.voiceName, musicName = p.musicName, sfxName = p.sfxName,
+                        audio = it.audio.copy(voiceUri = p.voiceUri, musicUri = p.musicUri, sfxCustomUri = p.sfxUri),
+                        notice = "Project restored (${p.images.size} scenes). You can Undo.", error = null
+                    )
+                }
+                refreshDurations()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = "Could not restore: ${e.message}") }
+            }
+        }
+    }
+
     fun setCaption(c: CaptionSettings) { _state.update { it.copy(caption = c) }; save() }
     fun setEnhance(e: EnhanceSettings) { _state.update { it.copy(enhance = e) }; save() }
 
@@ -462,7 +516,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- rendering (runs in RenderService) ----------------
 
     // RECONSTRUCTED name (original: SrtVideoGeneratorScreen$generateVideo)
-    fun generateVideo() {
+    /** [testFirst]..[testLast] (1-based, optional) = render only those scenes as a quick test. */
+    fun generateVideo(testFirst: Int? = null, testLast: Int? = null) {
         val s = _state.value
         if (s.rendering) return
         if (s.images.isEmpty()) {
@@ -472,7 +527,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val req = RenderRequest(
             images = s.images, srtUri = s.srtUri, wordSrtUri = s.wordSrtUri,
             resolution = s.resolution, fps = s.fps, zoomMode = s.zoomMode, showSubtitles = s.showSubtitles,
-            transitions = s.transitions, audio = s.audio, caption = s.caption, enhance = s.enhance
+            transitions = s.transitions, audio = s.audio, caption = s.caption, enhance = s.enhance,
+            watermark = s.watermark,
+            testFirst = testFirst?.let { (it - 1).coerceIn(0, s.images.lastIndex) },
+            testLast = testLast?.let { (it - 1).coerceIn(0, s.images.lastIndex) }
         )
         if (RenderController.begin(req)) {
             ContextCompat.startForegroundService(ctx, Intent(ctx, RenderService::class.java))

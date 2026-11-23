@@ -77,6 +77,16 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
         GLES20.glDisable(GLES20.GL_BLEND)
     }
 
+    /** Draws a logo in a corner: [corner] 0 TL, 1 TR, 2 BL, 3 BR; [sizeFrac] = width / frame width. */
+    fun drawLogo(tex: GlTexture, corner: Int, sizeFrac: Float, opacity: Float) {
+        val wPx = sizeFrac * width
+        val hPx = wPx * tex.height / tex.width
+        val m = 0.03f * min(width, height)
+        val cx = if (corner == 0 || corner == 2) -1f + (m + wPx / 2f) / (width / 2f) else 1f - (m + wPx / 2f) / (width / 2f)
+        val cy = if (corner < 2) 1f - (m + hPx / 2f) / (height / 2f) else -1f + (m + hPx / 2f) / (height / 2f)
+        drawPop(tex, cx, cy, wPx, hPx, 0f, opacity)
+    }
+
     /** Sharpen / contrast / colour applied to every picture. 0 / 1 / 1 = off. */
     fun setEnhance(sharpness: Float, contrastValue: Float, colourValue: Float) {
         sharp = sharpness; contrast = contrastValue; colour = colourValue

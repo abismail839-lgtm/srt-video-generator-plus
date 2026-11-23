@@ -14,8 +14,8 @@ android {
         applicationId = "com.bahaa.srtvideogenerator.upgraded"
         minSdk = 29
         targetSdk = 35
-        versionCode = 8
-        versionName = "5.0"
+        versionCode = 9
+        versionName = "5.1"
     }
 
     // Fixed signing key kept in the repo, so every build is signed the same way

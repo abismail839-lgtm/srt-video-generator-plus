@@ -44,6 +44,11 @@ class ProjectStore(context: Context) {
         return null
     }
 
+    /** Text form of a project, for the "save backup" button. */
+    fun encode(p: ProjectData): String = toJson(p).toString()
+
+    fun decode(text: String): ProjectData? = try { fromJson(JSONObject(text)) } catch (_: Exception) { null }
+
     // ---------- JSON ----------
 
     private fun JSONObject.putUri(key: String, u: Uri?) { if (u != null) put(key, u.toString()) }

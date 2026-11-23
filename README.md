@@ -49,3 +49,9 @@ If the build fails, copy the red error lines from the Actions log and send them 
 - Per scene: pop text (typed in the app: style, colour, size) and pop pictures (from the gallery), with animation, exact start second and duration, position, tilt, and a pop sound (built-in or own file), all with a live preview.
 - New sounds: ding, stamp thud, typewriter.
 - Pop items are saved with the project and can be copied to other scenes.
+
+## Update 5.1 (Upgrade D)
+- Quick test render: render only a range of scenes (with their effects, pops, voice-over and sounds) to check an edit fast.
+- Auto-ducking: music and scene sounds lower while the voice-over speaks (switch + amount).
+- Logo on the video: pick a picture, corner, size and opacity.
+- Project backup: save the whole project as a file and restore it.

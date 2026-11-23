@@ -215,7 +215,10 @@ data class AudioSettings(
     val sfxEnabled: Boolean = true,
     val sfxChoice: SfxChoice = SfxChoice.AUTO,
     val sfxCustomUri: Uri? = null,
-    val sfxVolume: Float = 0.03f
+    val sfxVolume: Float = 0.03f,
+    /** Lower the music and scene sounds while the voice-over is speaking. */
+    val duck: Boolean = true,
+    val duckAmount: Float = 0.6f
 )
 
 enum class CaptionPreset(val label: String) {
@@ -243,6 +246,19 @@ data class EnhanceSettings(
     val colour: Float = 1f
 )
 
+enum class WatermarkCorner(val label: String) {
+    TOP_LEFT("Top left"), TOP_RIGHT("Top right"), BOTTOM_LEFT("Bottom left"), BOTTOM_RIGHT("Bottom right")
+}
+
+/** A logo drawn on every frame of the video. [sizePct] = width as a fraction of the frame width. */
+data class WatermarkSettings(
+    val uri: Uri? = null,
+    val name: String? = null,
+    val corner: WatermarkCorner = WatermarkCorner.TOP_RIGHT,
+    val sizePct: Float = 0.15f,
+    val opacity: Float = 0.8f
+)
+
 data class RenderRequest(
     val images: List<ImageItem>,
     val srtUri: Uri?,
@@ -256,5 +272,9 @@ data class RenderRequest(
     val audio: AudioSettings = AudioSettings(),
     val caption: CaptionSettings = CaptionSettings(),
     val enhance: EnhanceSettings = EnhanceSettings(),
-    val fallbackSceneMs: Int = 3000
+    val fallbackSceneMs: Int = 3000,
+    val watermark: WatermarkSettings = WatermarkSettings(),
+    /** Test render: only scenes [testFirst]..[testLast] (0-based) are rendered. */
+    val testFirst: Int? = null,
+    val testLast: Int? = null
 )

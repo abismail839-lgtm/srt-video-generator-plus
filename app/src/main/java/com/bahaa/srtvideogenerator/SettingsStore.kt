@@ -1,6 +1,7 @@
 package com.bahaa.srtvideogenerator
 
 import android.content.Context
+import android.net.Uri
 
 // ===== NEW CODE (update, part 1): remembers your last settings =====
 
@@ -13,7 +14,8 @@ data class SavedSettings(
     val transitions: TransitionSettings = TransitionSettings(),
     val audio: AudioSettings = AudioSettings(),
     val caption: CaptionSettings = CaptionSettings(),
-    val enhance: EnhanceSettings = EnhanceSettings()
+    val enhance: EnhanceSettings = EnhanceSettings(),
+    val watermark: WatermarkSettings = WatermarkSettings()
 )
 
 class SettingsStore(context: Context) {
@@ -49,12 +51,21 @@ class SettingsStore(context: Context) {
                 musicLoop = prefs.getBoolean("musicLoop", a.musicLoop),
                 sfxEnabled = prefs.getBoolean("sfxEnabled", a.sfxEnabled),
                 sfxChoice = sfxChoice,
-                sfxVolume = prefs.getFloat("sfxVolume", a.sfxVolume)
+                sfxVolume = prefs.getFloat("sfxVolume", a.sfxVolume),
+                duck = prefs.getBoolean("duck", a.duck),
+                duckAmount = prefs.getFloat("duckAmount", a.duckAmount)
             ),
             caption = CaptionSettings(
                 preset = enumOf("capPreset", d.caption.preset),
                 sizeScale = prefs.getFloat("capSize", d.caption.sizeScale),
                 position = enumOf("capPos", d.caption.position)
+            ),
+            watermark = WatermarkSettings(
+                uri = prefs.getString("wmUri", null)?.let { Uri.parse(it) },
+                name = prefs.getString("wmName", null),
+                corner = enumOf("wmCorner", d.watermark.corner),
+                sizePct = prefs.getFloat("wmSize", d.watermark.sizePct),
+                opacity = prefs.getFloat("wmOpacity", d.watermark.opacity)
             ),
             enhance = EnhanceSettings(
                 sharpness = prefs.getFloat("enSharp", d.enhance.sharpness),
@@ -82,6 +93,13 @@ class SettingsStore(context: Context) {
             .putBoolean("sfxEnabled", s.audio.sfxEnabled)
             .putString("sfxChoice", s.audio.sfxChoice.name)
             .putFloat("sfxVolume", s.audio.sfxVolume)
+            .putBoolean("duck", s.audio.duck)
+            .putFloat("duckAmount", s.audio.duckAmount)
+            .putString("wmUri", s.watermark.uri?.toString())
+            .putString("wmName", s.watermark.name)
+            .putString("wmCorner", s.watermark.corner.name)
+            .putFloat("wmSize", s.watermark.sizePct)
+            .putFloat("wmOpacity", s.watermark.opacity)
             .putString("capPreset", s.caption.preset.name)
             .putFloat("capSize", s.caption.sizeScale)
             .putString("capPos", s.caption.position.name)

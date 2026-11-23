@@ -79,6 +79,7 @@ import com.bahaa.srtvideogenerator.EffectType
 import com.bahaa.srtvideogenerator.EnhanceSettings
 import com.bahaa.srtvideogenerator.MainViewModel
 import com.bahaa.srtvideogenerator.UiState
+import com.bahaa.srtvideogenerator.WatermarkCorner
 import com.bahaa.srtvideogenerator.PopAnim
 import com.bahaa.srtvideogenerator.PopItem
 import com.bahaa.srtvideogenerator.PopKind
@@ -106,6 +107,11 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     val musicPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(vm::setMusic) }
     val sfxPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(vm::setSfxFile) }
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { vm.setImageFolder(it) }
+    val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let { u -> vm.setWatermarkFile(u) } }
+    val backupSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { vm.exportProject(it) }
+    val backupOpener = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { vm.importProject(it) }
+    var testFrom by remember { mutableStateOf("1") }
+    var testTo by remember { mutableStateOf("5") }
     // Android 13+: ask once for the notification that shows render progress, then start anyway.
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { vm.generateVideo() }
     val startRender = {
@@ -245,6 +251,14 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                 LabeledSwitch("Auto-boost a quiet voice-over", s.audio.voiceBoost) {
                     vm.setAudio(s.audio.copy(voiceBoost = it))
                 }
+                LabeledSwitch("Lower music and scene sounds while the voice speaks", s.audio.duck) {
+                    vm.setAudio(s.audio.copy(duck = it))
+                }
+                if (s.audio.duck) {
+                    LabeledSlider("How much to lower them", "${(s.audio.duckAmount * 100).roundToInt()}%", s.audio.duckAmount, 0.1f..0.9f) {
+                        vm.setAudio(s.audio.copy(duckAmount = (it * 20).roundToInt() / 20f))
+                    }
+                }
                 FileRow("Background music", s.musicName, { musicPicker.launch(arrayOf("audio/*")) }, if (s.audio.musicUri != null) ({ vm.setMusic(null) }) else null)
                 if (s.audio.musicUri != null) {
                     LabeledSlider("Music volume", "${(s.audio.musicVolume * 100).roundToInt()}%", s.audio.musicVolume, 0f..1f) {
@@ -308,6 +322,61 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                 }
                 OutlinedButton(onClick = { vm.setEnhance(EnhanceSettings()) }) { Text("Reset to normal") }
                 Text("This only sharpens and adjusts colour. It does not add detail like AI upscaling.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        // ---------------- logo ----------------
+        item {
+            Section("8. Logo on the video") {
+                FileRow("Logo picture", s.watermark.name, { logoPicker.launch(arrayOf("image/*")) },
+                    if (s.watermark.uri != null) ({ vm.setWatermarkFile(null) }) else null)
+                if (s.watermark.uri != null) {
+                    Dropdown("Corner", s.watermark.corner.label, WatermarkCorner.entries, { it.label }) {
+                        vm.setWatermark(s.watermark.copy(corner = it))
+                    }
+                    LabeledSlider("Size", "${(s.watermark.sizePct * 100).roundToInt()}%", s.watermark.sizePct, 0.05f..0.4f) {
+                        vm.setWatermark(s.watermark.copy(sizePct = (it * 100).roundToInt() / 100f))
+                    }
+                    LabeledSlider("Opacity", "${(s.watermark.opacity * 100).roundToInt()}%", s.watermark.opacity, 0.2f..1f) {
+                        vm.setWatermark(s.watermark.copy(opacity = (it * 20).roundToInt() / 20f))
+                    }
+                }
+            }
+        }
+
+        // ---------------- backup ----------------
+        item {
+            Section("9. Project backup") {
+                Text("Your project is already saved automatically. A backup file is an extra copy you can keep.", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { backupSaver.launch("HU_project_backup.json") }, enabled = s.images.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Save backup") }
+                    OutlinedButton(onClick = { backupOpener.launch(arrayOf("*/*")) }, modifier = Modifier.weight(1f)) { Text("Restore backup") }
+                }
+                s.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+
+        // ---------------- test render ----------------
+        if (s.images.isNotEmpty() && !s.rendering) {
+            item {
+                Section("Quick test render") {
+                    Text("Render only some scenes to check your effects and pops in a minute, instead of the whole video.", style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = testFrom, onValueChange = { testFrom = it.filter(Char::isDigit).take(5) }, label = { Text("From scene") },
+                            singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = testTo, onValueChange = { testTo = it.filter(Char::isDigit).take(5) }, label = { Text("To scene") },
+                            singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Button(onClick = {
+                        val a = (testFrom.toIntOrNull() ?: 1).coerceIn(1, s.images.size)
+                        val b = (testTo.toIntOrNull() ?: a).coerceIn(1, s.images.size)
+                        vm.generateVideo(minOf(a, b), maxOf(a, b))
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Render this test") }
+                }
             }
         }
 

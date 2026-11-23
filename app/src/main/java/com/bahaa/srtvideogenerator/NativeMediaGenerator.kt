@@ -38,7 +38,7 @@ class NativeMediaGenerator(private val context: Context) {
         val wordCues = req.wordSrtUri?.let { SrtParser.parse(context, it) } ?: emptyList()
         val voiceUs = req.audio.voiceUri?.let { mediaDurationUs(it) } ?: 0L
 
-        val timeline = TimelinePlanner.plan(
+        val fullTimeline = TimelinePlanner.plan(
             imageCount = req.images.size,
             cues = cues,
             perImage = req.images.map { it.transition },
@@ -47,6 +47,36 @@ class NativeMediaGenerator(private val context: Context) {
             fallbackSceneMs = req.fallbackSceneMs
         )
 
+        // Test render: cut the timeline down to the chosen scenes and move it to start at 0.
+        var timeline = fullTimeline
+        var rq = req
+        var cuesR = cues
+        var wordR = wordCues
+        var voiceOffsetUs = 0L
+        val tf = req.testFirst
+        if (tf != null) {
+            val n = req.images.size
+            val first = tf.coerceIn(0, n - 1)
+            val last = (req.testLast ?: first).coerceIn(first, n - 1)
+            val winStart = fullTimeline.scenes[first].startUs
+            val winEnd = fullTimeline.scenes[last].endUs
+            fun shift(list: List<SrtCue>) = list.filter { it.endUs > winStart && it.startUs < winEnd }
+                .map { it.copy(startUs = it.startUs - winStart, endUs = it.endUs - winStart) }
+            timeline = Timeline(
+                scenes = (first..last).map { Scene(it - first, fullTimeline.scenes[it].startUs - winStart, fullTimeline.scenes[it].endUs - winStart) },
+                boundaries = (first..last).map { idx ->
+                    if (idx == first) null else fullTimeline.boundaries.getOrNull(idx)?.let {
+                        Boundary(idx - first, it.type, it.centerUs - winStart, it.durUs)
+                    }
+                },
+                totalUs = winEnd - winStart
+            )
+            rq = req.copy(images = req.images.subList(first, last + 1), testFirst = null, testLast = null)
+            cuesR = shift(cues)
+            wordR = shift(wordCues)
+            voiceOffsetUs = winStart
+        }
+
         val work = File(context.cacheDir, "render").apply { deleteRecursively(); mkdirs() }
         val videoOnly = File(work, "video.mp4")
         val audioFile = File(work, "audio.m4a")
@@ -54,11 +84,11 @@ class NativeMediaGenerator(private val context: Context) {
 
         try {
             onProgress(0f, "Rendering video…")
-            renderImages(req, timeline, cues, wordCues, videoOnly, { onProgress(it * 0.75f, "Rendering video…") }, cancelled)
+            renderImages(rq, timeline, cuesR, wordR, videoOnly, { onProgress(it * 0.75f, "Rendering video…") }, cancelled)
 
             onProgress(0.75f, "Mixing audio…")
             val mixed = try {
-                AudioMixer(context).mix(req.audio, timeline, audioFile, voiceUs, req.images.map { it.sfx }, req.images.map { it.ambience }, req.images.map { it.pops }, cancelled) {
+                AudioMixer(context).mix(rq.audio, timeline, audioFile, voiceUs, rq.images.map { it.sfx }, rq.images.map { it.ambience }, rq.images.map { it.pops }, voiceOffsetUs, cancelled) {
                     onProgress(0.75f + it * 0.2f, "Mixing audio…")
                 }
             } catch (e: InterruptedException) { throw Cancelled() }
@@ -69,7 +99,7 @@ class NativeMediaGenerator(private val context: Context) {
                 finalFile
             } else videoOnly
 
-            val name = "SRT_Video_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+            val name = (if (tf != null) "SRT_Video_TEST_" else "SRT_Video_") + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
                 .format(java.util.Date()) + ".mp4"
             val uri = publishVideo(toPublish, name)
             onProgress(1f, "Saved to Movies/SRT Video Generator")
@@ -106,6 +136,7 @@ class NativeMediaGenerator(private val context: Context) {
         var egl: EglCore? = null
         var renderer: SurfaceRenderer? = null
         var pops: PopLayer? = null
+        var logoTex: GlTexture? = null
         val textures = HashMap<Int, GlTexture>()
         val clips = HashMap<Int, VideoClip>()
         val clipKey = HashMap<Int, Long>()
@@ -121,6 +152,13 @@ class NativeMediaGenerator(private val context: Context) {
             renderer = r
             val popLayer = PopLayer(context, r, w, h)
             pops = popLayer
+            val wmUri = req.watermark.uri
+            if (wmUri != null) {
+                logoTex = try {
+                    val b = BitmapLoader.decode(context, wmUri, 512)
+                    try { r.createTexture(b) } finally { b.recycle() }
+                } catch (_: Exception) { null }
+            }
 
             fun tex(i: Int): GlTexture = textures.getOrPut(i) {
                 val bmp = decodeBitmap(req.images[i].uri, max(w, h))
@@ -187,6 +225,7 @@ class NativeMediaGenerator(private val context: Context) {
                 val word = wordCues.activeAt(t)
                 if (word != null) r.drawCaption(word.text, word = true, style = req.caption)
                 if (req.showSubtitles) cues.activeAt(t)?.let { r.drawCaption(it.text, word = false, style = req.caption) }
+                logoTex?.let { r.drawLogo(it, req.watermark.corner.ordinal, req.watermark.sizePct, req.watermark.opacity) }
 
                 e0.setPresentationTimeNs(t * 1000L)
                 e0.swapBuffers()
@@ -198,6 +237,7 @@ class NativeMediaGenerator(private val context: Context) {
         } finally {
             clips.values.forEach { it.close() }
             try { pops?.release() } catch (_: Exception) {}
+            try { logoTex?.let { renderer?.deleteTexture(it) } } catch (_: Exception) {}
             try { renderer?.release() } catch (_: Exception) {}
             egl?.release()
             try { encoder.stop() } catch (_: Exception) {}
