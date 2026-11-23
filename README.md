@@ -39,3 +39,8 @@ If the build fails, copy the red error lines from the Actions log and send them 
 - Undo button for bulk and single changes.
 - "Apply to all" asks first and can skip scenes that already have settings; shuffle / reset / new project also ask.
 - Seconds per scene and total length shown in the list (needs the SRT).
+
+## Update 4.1 (Upgrade B: scene editor)
+- Scenes are a horizontal strip of thumbnails (scroll sideways), with "go to scene number".
+- Tap a scene to edit it in one panel: live preview with its effect, transition, transition sound, scene sound, effect, voice-over play, back/next.
+- Copy a scene's settings to a range of scenes (choose which parts), with a confirmation and Undo.

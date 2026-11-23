@@ -404,6 +404,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { s -> s.copy(images = s.images.map { it.copy(transition = null) }) }
     }
 
+    /** Parts of a scene that can be copied to other scenes. */
+    enum class CopyPart { TRANSITION, SOUND, EFFECT, SCENE_SOUND }
+
+    /** Copies the chosen settings of scene [from] onto scenes [first]..[last] (all 0-based, inclusive). */
+    fun copySceneSettings(from: Int, first: Int, last: Int, parts: Set<CopyPart>) {
+        val src = _state.value.images.getOrNull(from) ?: return
+        pushUndo()
+        _state.update { s ->
+            s.copy(images = s.images.mapIndexed { i, im ->
+                if (i < first || i > last || i == from) im else {
+                    var n = im
+                    if (CopyPart.TRANSITION in parts) n = n.copy(transition = src.transition)
+                    if (CopyPart.SOUND in parts) n = n.copy(sfx = src.sfx)
+                    if (CopyPart.EFFECT in parts) n = n.copy(effect = src.effect)
+                    if (CopyPart.SCENE_SOUND in parts) n = n.copy(ambience = src.ambience)
+                    n
+                }
+            })
+        }
+    }
+
     /** Gives every image its own random transition (no two neighbours the same). */
     fun shuffleTransitions() {
         pushUndo()

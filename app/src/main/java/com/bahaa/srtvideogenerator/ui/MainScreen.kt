@@ -9,6 +9,22 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,6 +78,7 @@ import com.bahaa.srtvideogenerator.EffectSettings
 import com.bahaa.srtvideogenerator.EffectType
 import com.bahaa.srtvideogenerator.EnhanceSettings
 import com.bahaa.srtvideogenerator.MainViewModel
+import com.bahaa.srtvideogenerator.UiState
 import com.bahaa.srtvideogenerator.Resolution
 import com.bahaa.srtvideogenerator.SfxChoice
 import com.bahaa.srtvideogenerator.TransitionType
@@ -97,6 +114,7 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     var effectIndex by remember { mutableStateOf<Int?>(null) }
     var ambienceIndex by remember { mutableStateOf<Int?>(null) }
     var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+    var selected by rememberSaveable { mutableStateOf(0) }
     var applyAllEffect by remember { mutableStateOf<EffectSettings?>(null) }
     var applyAllAmbience by remember { mutableStateOf<AmbienceSettings?>(null) }
 
@@ -177,53 +195,23 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
             }
         }
 
-        // ---------------- per-image ----------------
+        // ---------------- scene editor ----------------
         if (s.images.isNotEmpty()) {
             item {
-                Text("Per-image settings (transition, sound, effect)", style = MaterialTheme.typography.titleMedium)
+                SceneStrip(
+                    s = s, selected = selected.coerceIn(0, s.images.lastIndex),
+                    onSelect = { selected = it }
+                )
             }
-            itemsIndexed(s.images) { i, img ->
-                Card(Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(10.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Thumb(img.uri)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                "${i + 1}. ${if (img.isVideo) "🎬 " else ""}${img.name}" +
-                                    (s.sceneSecs.getOrNull(i)?.let { "  ·  %.1f s".format(it) } ?: ""),
-                                maxLines = 1, style = MaterialTheme.typography.bodyMedium
-                            )
-                            if (i == 0) {
-                                Text("Opening image (no transition or sound)", style = MaterialTheme.typography.bodySmall)
-                            } else {
-                                if (s.transitions.enabled) {
-                                    val label = img.transition?.label ?: "Default (${s.transitions.default.label})"
-                                    Dropdown("Transition in", label, listOf<TransitionType?>(null) + TransitionType.entries,
-                                        { it?.label ?: "Default" }) { vm.setImageTransition(i, it) }
-                                }
-                                if (s.audio.sfxEnabled) {
-                                    val opts = listOf<SfxChoice?>(null) +
-                                        SfxChoice.entries.filter { it != SfxChoice.CUSTOM || s.audio.sfxCustomUri != null }
-                                    Dropdown("Sound", img.sfx?.label ?: "Default (${s.audio.sfxChoice.label})", opts,
-                                        { it?.label ?: "Default" }) { vm.setImageSfx(i, it) }
-                                }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { effectIndex = i }) {
-                                    Text(if (img.effect.type == EffectType.NONE) "Add effect" else "Effect: ${img.effect.type.label}", maxLines = 1)
-                                }
-                                if (i > 0 && s.transitions.enabled) TextButton(onClick = { previewIndex = i }) { Text("Preview") }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { ambienceIndex = i }) {
-                                    Text(if (img.ambience.type == AmbienceType.NONE) "Add scene sound" else "Scene sound: ${img.ambience.type.label}", maxLines = 1)
-                                }
-                                TextButton(onClick = { vm.playScene(i) }) {
-                                    Text(if (s.playingScene == i) "■ Stop" else "▶ Voice")
-                                }
-                            }
-                        }
-                    }
-                }
+            item {
+                SceneEditor(
+                    vm = vm, s = s, index = selected.coerceIn(0, s.images.lastIndex),
+                    onSelect = { selected = it },
+                    onEffect = { effectIndex = it },
+                    onAmbience = { ambienceIndex = it },
+                    onPreview = { previewIndex = it },
+                    onConfirm = { msg, action -> confirm = msg to action }
+                )
             }
         }
 
@@ -571,13 +559,169 @@ private fun <T> Dropdown(label: String, current: String, options: List<T>, label
     }
 }
 
+private object ThumbCache {
+    val cache = android.util.LruCache<String, Bitmap>(120)
+}
+
 @Composable
-private fun Thumb(uri: Uri) {
+private fun Thumb(uri: Uri, size: Dp = 64.dp) {
     val ctx = LocalContext.current
-    val bmp by produceState<Bitmap?>(null, uri) {
-        value = withContext(Dispatchers.IO) { try { BitmapLoader.decode(ctx, uri, 160) } catch (_: Exception) { null } }
+    val bmp by produceState<Bitmap?>(ThumbCache.cache.get(uri.toString()), uri) {
+        if (value == null) {
+            value = withContext(Dispatchers.IO) {
+                try { BitmapLoader.decode(ctx, uri, 200).also { ThumbCache.cache.put(uri.toString(), it) } } catch (_: Exception) { null }
+            }
+        }
     }
     val b = bmp
-    if (b != null) Image(b.asImageBitmap(), null, Modifier.size(64.dp), contentScale = ContentScale.Crop)
-    else Box(Modifier.size(64.dp))
+    if (b != null) Image(b.asImageBitmap(), null, Modifier.size(size), contentScale = ContentScale.Crop)
+    else Box(Modifier.size(size).background(Color(0x33888888)))
+}
+
+// ---------------------------------------------------------------- scene editor
+
+@Composable
+private fun SceneStrip(s: UiState, selected: Int, onSelect: (Int) -> Unit) {
+    val state = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var jump by remember { mutableStateOf("") }
+    Section("Scenes (scroll sideways, tap one to edit it)") {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = jump, onValueChange = { jump = it.filter(Char::isDigit).take(5) },
+                label = { Text("Go to scene") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f)
+            )
+            Button(onClick = {
+                val n = (jump.toIntOrNull() ?: return@Button).coerceIn(1, s.images.size) - 1
+                onSelect(n)
+                scope.launch { state.animateScrollToItem(n) }
+            }) { Text("Go") }
+        }
+        LazyRow(state = state, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            itemsIndexed(s.images) { i, img ->
+                val sel = i == selected
+                Column(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(if (sel) 3.dp else 1.dp, if (sel) MaterialTheme.colorScheme.primary else Color(0x55888888), RoundedCornerShape(8.dp))
+                        .clickable { onSelect(i) }
+                        .padding(4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Thumb(img.uri, 92.dp)
+                    val marks = (if (img.effect.type != EffectType.NONE) "✨" else "") +
+                        (if (img.ambience.type != AmbienceType.NONE) "🎧" else "") +
+                        (if (img.transition != null) "↔" else "") + (if (img.sfx != null) "♪" else "")
+                    Text("${i + 1}${if (img.isVideo) " 🎬" else ""}", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        (s.sceneSecs.getOrNull(i)?.let { "%.1fs".format(it) } ?: "") + " " + marks,
+                        style = MaterialTheme.typography.labelSmall, maxLines = 1
+                    )
+                }
+            }
+        }
+        Text("✨ effect   🎧 scene sound   ↔ own transition   ♪ own sound", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun SceneEditor(
+    vm: MainViewModel, s: UiState, index: Int,
+    onSelect: (Int) -> Unit, onEffect: (Int) -> Unit, onAmbience: (Int) -> Unit, onPreview: (Int) -> Unit,
+    onConfirm: (String, () -> Unit) -> Unit
+) {
+    val img = s.images[index]
+    val ctx = LocalContext.current
+    val params = remember { EffectPreviewParams() }
+    params.settings = img.effect
+    val bmp by produceState<Bitmap?>(null, img.uri) {
+        value = withContext(Dispatchers.IO) { try { BitmapLoader.decode(ctx, img.uri, 640) } catch (_: Exception) { null } }
+    }
+    Section("Edit scene ${index + 1} of ${s.images.size}") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { onSelect((index - 1).coerceAtLeast(0)) }, enabled = index > 0) { Text("◀ Back") }
+            OutlinedButton(onClick = { onSelect((index + 1).coerceAtMost(s.images.lastIndex)) }, enabled = index < s.images.lastIndex) { Text("Next ▶") }
+            TextButton(onClick = { vm.playScene(index) }) { Text(if (s.playingScene == index) "■ Stop" else "▶ Voice") }
+        }
+        Text(
+            "${if (img.isVideo) "🎬 " else ""}${img.name}" + (s.sceneSecs.getOrNull(index)?.let { "  ·  %.1f s".format(it) } ?: ""),
+            style = MaterialTheme.typography.bodyMedium, maxLines = 1
+        )
+        val b = bmp
+        if (b != null) {
+            key(index, b) {
+                AndroidView(
+                    factory = { EffectPreviewView(it, b, params) },
+                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                )
+            }
+        } else Text("Loading preview…")
+        Text("The preview shows this scene's picture with its effect.", style = MaterialTheme.typography.bodySmall)
+
+        if (index == 0) {
+            Text("Opening scene (no transition or sound before it).", style = MaterialTheme.typography.bodySmall)
+        } else {
+            if (s.transitions.enabled) {
+                val label = img.transition?.label ?: "Default (${s.transitions.default.label})"
+                Dropdown("Transition in", label, listOf<TransitionType?>(null) + TransitionType.entries, { it?.label ?: "Default" }) {
+                    vm.setImageTransition(index, it)
+                }
+                TextButton(onClick = { onPreview(index) }) { Text("Preview this transition") }
+            }
+            if (s.audio.sfxEnabled) {
+                val opts = listOf<SfxChoice?>(null) + SfxChoice.entries.filter { it != SfxChoice.CUSTOM || s.audio.sfxCustomUri != null }
+                Dropdown("Transition sound", img.sfx?.label ?: "Default (${s.audio.sfxChoice.label})", opts, { it?.label ?: "Default" }) {
+                    vm.setImageSfx(index, it)
+                }
+            }
+        }
+        OutlinedButton(onClick = { onEffect(index) }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (img.effect.type == EffectType.NONE) "Add effect" else "Effect: ${img.effect.type.label}", maxLines = 1)
+        }
+        OutlinedButton(onClick = { onAmbience(index) }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (img.ambience.type == AmbienceType.NONE) "Add scene sound" else "Scene sound: ${img.ambience.type.label}", maxLines = 1)
+        }
+
+        // ---- copy this scene's settings to other scenes ----
+        var from by remember(index) { mutableStateOf((index + 2).coerceAtMost(s.images.size).toString()) }
+        var to by remember(index) { mutableStateOf((index + 2).coerceAtMost(s.images.size).toString()) }
+        var cT by remember { mutableStateOf(true) }
+        var cS by remember { mutableStateOf(true) }
+        var cE by remember { mutableStateOf(true) }
+        var cA by remember { mutableStateOf(true) }
+        Text("Copy this scene's settings to other scenes", style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = from, onValueChange = { from = it.filter(Char::isDigit).take(5) }, label = { Text("From scene") },
+                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = to, onValueChange = { to = it.filter(Char::isDigit).take(5) }, label = { Text("To scene") },
+                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f)
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cT, { cT = it }); Text("Transition") }
+        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cS, { cS = it }); Text("Transition sound") }
+        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cE, { cE = it }); Text("Effect") }
+        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cA, { cA = it }); Text("Scene sound") }
+        Button(onClick = {
+            val a = ((from.toIntOrNull() ?: 1).coerceIn(1, s.images.size)) - 1
+            val z = ((to.toIntOrNull() ?: a + 1).coerceIn(1, s.images.size)) - 1
+            val first = minOf(a, z)
+            val last = maxOf(a, z)
+            val parts = buildSet {
+                if (cT) add(MainViewModel.CopyPart.TRANSITION)
+                if (cS) add(MainViewModel.CopyPart.SOUND)
+                if (cE) add(MainViewModel.CopyPart.EFFECT)
+                if (cA) add(MainViewModel.CopyPart.SCENE_SOUND)
+            }
+            if (parts.isNotEmpty()) {
+                onConfirm("Copy the chosen settings of scene ${index + 1} onto scenes ${first + 1} to ${last + 1}? This replaces what those scenes have now (you can Undo).") {
+                    vm.copySceneSettings(index, first, last, parts)
+                }
+            }
+        }, modifier = Modifier.fillMaxWidth()) { Text("Copy to these scenes") }
+    }
 }
