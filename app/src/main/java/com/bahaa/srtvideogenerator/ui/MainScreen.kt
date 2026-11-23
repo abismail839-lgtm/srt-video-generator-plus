@@ -96,6 +96,9 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     var previewIndex by remember { mutableStateOf<Int?>(null) }
     var effectIndex by remember { mutableStateOf<Int?>(null) }
     var ambienceIndex by remember { mutableStateOf<Int?>(null) }
+    var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+    var applyAllEffect by remember { mutableStateOf<EffectSettings?>(null) }
+    var applyAllAmbience by remember { mutableStateOf<AmbienceSettings?>(null) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().statusBarsPadding(),
@@ -103,6 +106,25 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item { Text("HU Video Maker", style = MaterialTheme.typography.headlineSmall) }
+
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { vm.undo() }, enabled = s.undoCount > 0) { Text("↩ Undo (${s.undoCount})") }
+                    OutlinedButton(onClick = {
+                        confirm = "Start a new project? Your pictures and per-scene settings will be cleared (you can still Undo)." to { vm.newProject() }
+                    }, enabled = s.images.isNotEmpty()) { Text("New project") }
+                }
+                if (s.images.isNotEmpty()) {
+                    val total = s.totalSecs.roundToInt()
+                    Text(
+                        "${s.images.size} scenes" + (if (s.sceneSecs.isNotEmpty()) " · total ${total / 60}:${"%02d".format(total % 60)}" else "") +
+                            " · your work is saved automatically",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
 
         // ---------------- files ----------------
         item {
@@ -140,8 +162,12 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                         vm.setTransitions(s.transitions.copy(durationMs = ((it * 10).roundToInt() * 100)))
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { vm.shuffleTransitions() }) { Text("Shuffle each image") }
-                        OutlinedButton(onClick = { vm.clearOverrides() }) { Text("Reset overrides") }
+                        OutlinedButton(onClick = {
+                            confirm = "Give all ${s.images.size} scenes a random transition? This replaces the transitions you chose (you can Undo)." to { vm.shuffleTransitions() }
+                        }) { Text("Shuffle each image") }
+                        OutlinedButton(onClick = {
+                            confirm = "Reset the transitions you chose on ${s.images.count { it.transition != null }} scenes back to the default? (you can Undo)" to { vm.clearOverrides() }
+                        }) { Text("Reset overrides") }
                     }
                     Text(
                         "Tip: tap an image row below to give it its own transition. Image 1 has no transition (it starts the video).",
@@ -161,7 +187,11 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                     Row(Modifier.padding(10.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Thumb(img.uri)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("${i + 1}. ${if (img.isVideo) "🎬 " else ""}${img.name}", maxLines = 1, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "${i + 1}. ${if (img.isVideo) "🎬 " else ""}${img.name}" +
+                                    (s.sceneSecs.getOrNull(i)?.let { "  ·  %.1f s".format(it) } ?: ""),
+                                maxLines = 1, style = MaterialTheme.typography.bodyMedium
+                            )
                             if (i == 0) {
                                 Text("Opening image (no transition or sound)", style = MaterialTheme.typography.bodySmall)
                             } else {
@@ -299,15 +329,66 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         PreviewDialog(vm, i) { previewIndex = null }
     }
     effectIndex?.let { i ->
-        EffectDialog(vm, i) { effectIndex = null }
+        EffectDialog(vm, i, onAll = { applyAllEffect = it }) { effectIndex = null }
     }
     ambienceIndex?.let { i ->
-        AmbienceDialog(vm, i) { ambienceIndex = null }
+        AmbienceDialog(vm, i, onAll = { applyAllAmbience = it }) { ambienceIndex = null }
+    }
+
+    confirm?.let { (msg, action) ->
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text("Are you sure?") },
+            text = { Text(msg) },
+            confirmButton = { TextButton(onClick = { confirm = null; action() }) { Text("Yes, do it") } },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } }
+        )
+    }
+    applyAllEffect?.let { e ->
+        val filled = s.images.count { it.effect.type != EffectType.NONE }
+        ApplyAllDialog(
+            what = if (e.type == EffectType.NONE) "REMOVE the effect from" else "put \"${e.type.label}\" on",
+            total = s.images.size, filled = filled, filledWhat = "already have an effect",
+            onlyEmpty = { vm.applyEffectToAll(e, true); applyAllEffect = null },
+            overwrite = { vm.applyEffectToAll(e, false); applyAllEffect = null },
+            cancel = { applyAllEffect = null }
+        )
+    }
+    applyAllAmbience?.let { a ->
+        val filled = s.images.count { it.ambience.type != AmbienceType.NONE }
+        ApplyAllDialog(
+            what = if (a.type == AmbienceType.NONE) "REMOVE the scene sound from" else "put \"${a.type.label}\" on",
+            total = s.images.size, filled = filled, filledWhat = "already have a scene sound",
+            onlyEmpty = { vm.applyAmbienceToAll(a, true); applyAllAmbience = null },
+            overwrite = { vm.applyAmbienceToAll(a, false); applyAllAmbience = null },
+            cancel = { applyAllAmbience = null }
+        )
     }
 }
 
 @Composable
-private fun AmbienceDialog(vm: MainViewModel, index: Int, onClose: () -> Unit) {
+private fun ApplyAllDialog(
+    what: String, total: Int, filled: Int, filledWhat: String,
+    onlyEmpty: () -> Unit, overwrite: () -> Unit, cancel: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = cancel,
+        title = { Text("Apply to all scenes?") },
+        confirmButton = {},
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("This will $what scenes. $filled of your $total scenes $filledWhat.")
+                Button(onClick = onlyEmpty, modifier = Modifier.fillMaxWidth()) { Text("Only scenes that are empty (safe)") }
+                OutlinedButton(onClick = overwrite, modifier = Modifier.fillMaxWidth()) { Text("Overwrite ALL $total scenes") }
+                TextButton(onClick = cancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+                Text("You can still tap Undo afterwards.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    )
+}
+
+@Composable
+private fun AmbienceDialog(vm: MainViewModel, index: Int, onAll: (AmbienceSettings) -> Unit, onClose: () -> Unit) {
     val s by vm.state.collectAsState()
     val ctx = LocalContext.current
     if (index !in s.images.indices) { onClose(); return }
@@ -324,7 +405,7 @@ private fun AmbienceDialog(vm: MainViewModel, index: Int, onClose: () -> Unit) {
         confirmButton = { TextButton(onClick = { vm.setImageAmbience(index, a); onClose() }) { Text("Apply") } },
         dismissButton = {
             Row {
-                TextButton(onClick = { vm.applyAmbienceToAll(a); onClose() }) { Text("Apply to all") }
+                TextButton(onClick = { onAll(a); onClose() }) { Text("Apply to all") }
                 TextButton(onClick = onClose) { Text("Cancel") }
             }
         },
@@ -355,7 +436,7 @@ private fun AmbienceDialog(vm: MainViewModel, index: Int, onClose: () -> Unit) {
 }
 
 @Composable
-private fun EffectDialog(vm: MainViewModel, index: Int, onClose: () -> Unit) {
+private fun EffectDialog(vm: MainViewModel, index: Int, onAll: (EffectSettings) -> Unit, onClose: () -> Unit) {
     val s by vm.state.collectAsState()
     val ctx = LocalContext.current
     if (index !in s.images.indices) { onClose(); return }
@@ -373,7 +454,7 @@ private fun EffectDialog(vm: MainViewModel, index: Int, onClose: () -> Unit) {
         },
         dismissButton = {
             Row {
-                TextButton(onClick = { vm.applyEffectToAll(e); onClose() }) { Text("Apply to all") }
+                TextButton(onClick = { onAll(e); onClose() }) { Text("Apply to all") }
                 TextButton(onClick = onClose) { Text("Cancel") }
             }
         },

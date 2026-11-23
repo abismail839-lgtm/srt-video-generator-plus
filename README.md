@@ -33,3 +33,9 @@ If the build fails, copy the red error lines from the Actions log and send them 
 
 ## Update 3.2
 - Animated clips (video files) can be mixed with still images, in the picker or in a folder. Each clip is one scene: cut to the scene length, or frozen on its last frame if shorter. The clip's own sound is not used.
+
+## Update 4.0 (Upgrade A: never lose work)
+- Whole project (pictures, files, every per-scene setting) is saved automatically and restored when you reopen the app; the previous save is kept as a backup.
+- Undo button for bulk and single changes.
+- "Apply to all" asks first and can skip scenes that already have settings; shuffle / reset / new project also ask.
+- Seconds per scene and total length shown in the list (needs the SRT).

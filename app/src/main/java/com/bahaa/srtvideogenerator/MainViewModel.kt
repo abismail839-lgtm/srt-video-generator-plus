@@ -13,6 +13,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,6 +39,10 @@ data class UiState(
     val enhance: EnhanceSettings = EnhanceSettings(),
     /** Index of the image whose voice-over part is playing, or null. */
     val playingScene: Int? = null,
+    /** Length of each scene in seconds (needs the SRT), and the whole video. */
+    val sceneSecs: List<Float> = emptyList(),
+    val totalSecs: Float = 0f,
+    val undoCount: Int = 0,
     val rendering: Boolean = false,
     val progress: Float = 0f,
     val status: String = "",
@@ -105,6 +111,11 @@ fun loadImagesFromFolder(context: Context, tree: Uri): List<ImageItem> {
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = SettingsStore(app)
+    private val projectStore = ProjectStore(app)
+    private val undoStack = ArrayDeque<List<ImageItem>>()
+    private var saveJob: Job? = null
+    private var lastSaved: ProjectData? = null
+    private var durJob: Job? = null
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -118,6 +129,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 showSubtitles = saved.showSubtitles, transitions = saved.transitions, audio = saved.audio,
                 caption = saved.caption, enhance = saved.enhance
             )
+        }
+        // bring back the last project (pictures, files and every per-scene setting)
+        projectStore.load()?.let { p ->
+            _state.update {
+                it.copy(
+                    images = p.images, imageSource = p.imageSource,
+                    srtUri = p.srtUri, srtName = p.srtName, wordSrtUri = p.wordSrtUri, wordSrtName = p.wordSrtName,
+                    voiceName = p.voiceName, musicName = p.musicName, sfxName = p.sfxName,
+                    audio = it.audio.copy(voiceUri = p.voiceUri, musicUri = p.musicUri, sfxCustomUri = p.sfxUri)
+                )
+            }
+            lastSaved = p
+            refreshDurations()
+        }
+        // auto-save the project a moment after every change
+        viewModelScope.launch {
+            _state.collect { s ->
+                val snap = ProjectData(
+                    s.images, s.imageSource, s.srtUri, s.srtName, s.wordSrtUri, s.wordSrtName,
+                    s.audio.voiceUri, s.voiceName, s.audio.musicUri, s.musicName, s.audio.sfxCustomUri, s.sfxName
+                )
+                if (snap != lastSaved) {
+                    lastSaved = snap
+                    saveJob?.cancel()
+                    saveJob = viewModelScope.launch(Dispatchers.IO) { delay(700); projectStore.save(snap) }
+                }
+            }
         }
         // mirror the background renderer's progress into the screen state
         viewModelScope.launch {
@@ -146,9 +184,68 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setImages(uris: List<Uri>) {
         if (uris.isEmpty()) return
         uris.forEach(::persist)
+        pushUndo()
         _state.update {
-            it.copy(images = loadImageUris(ctx, uris), imageSource = "${uris.size} selected (sorted by name)",
+            it.copy(images = mergeSettings(it.images, loadImageUris(ctx, uris)), imageSource = "${uris.size} selected (sorted by name)",
                 resultUri = null, error = null)
+        }
+        refreshDurations()
+    }
+
+    /** Pictures you pick again keep the settings you gave them before. */
+    private fun mergeSettings(old: List<ImageItem>, fresh: List<ImageItem>): List<ImageItem> {
+        val byUri = old.associateBy { it.uri.toString() }
+        return fresh.map { n ->
+            val o = byUri[n.uri.toString()]
+            if (o == null) n else n.copy(
+                transition = o.transition, sfx = o.sfx, effect = o.effect, ambience = o.ambience
+            )
+        }
+    }
+
+    // ---------------- undo ----------------
+
+    private fun pushUndo() {
+        undoStack.addLast(_state.value.images)
+        while (undoStack.size > 40) undoStack.removeFirst()
+        _state.update { it.copy(undoCount = undoStack.size) }
+    }
+
+    fun undo() {
+        val last = undoStack.removeLastOrNull() ?: return
+        _state.update { it.copy(images = last, undoCount = undoStack.size) }
+        refreshDurations()
+    }
+
+    fun newProject() {
+        pushUndo()
+        _state.update {
+            it.copy(
+                images = emptyList(), imageSource = null, srtUri = null, srtName = null,
+                wordSrtUri = null, wordSrtName = null, voiceName = null, musicName = null, sfxName = null,
+                audio = it.audio.copy(voiceUri = null, musicUri = null, sfxCustomUri = null),
+                sceneSecs = emptyList(), totalSecs = 0f, resultUri = null, error = null
+            )
+        }
+    }
+
+    // ---------------- seconds per scene ----------------
+
+    fun refreshDurations() {
+        durJob?.cancel()
+        durJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val s = _state.value
+                if (s.images.isEmpty()) {
+                    _state.update { it.copy(sceneSecs = emptyList(), totalSecs = 0f) }
+                    return@launch
+                }
+                val cues = s.srtUri?.let { SrtParser.parse(ctx, it) } ?: emptyList()
+                val voiceUs = s.audio.voiceUri?.let { NativeMediaGenerator(ctx).mediaDurationUs(it) } ?: 0L
+                val tl = TimelinePlanner.plan(s.images.size, cues, emptyList(), TransitionSettings(enabled = false), voiceUs, 3000)
+                val secs = tl.scenes.map { it.durationUs / 1_000_000f }
+                _state.update { it.copy(sceneSecs = secs, totalSecs = tl.totalUs / 1_000_000f) }
+            } catch (_: Exception) {}
         }
     }
 
@@ -158,21 +255,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val items = loadImagesFromFolder(ctx, tree)
+                pushUndo()
                 _state.update {
                     it.copy(
-                        images = items,
+                        images = mergeSettings(it.images, items),
                         imageSource = if (items.isEmpty()) "No images found in that folder"
                         else "Folder: ${items.size} images (sorted by name)",
                         resultUri = null, error = null
                     )
                 }
+                refreshDurations()
             } catch (e: Exception) {
                 _state.update { it.copy(error = "Could not read folder: ${e.message}") }
             }
         }
     }
 
-    fun setSrt(uri: Uri?) { uri?.let(::persist); _state.update { it.copy(srtUri = uri, srtName = uri?.let { u -> displayName(ctx, u) }) } }
+    fun setSrt(uri: Uri?) { uri?.let(::persist); _state.update { it.copy(srtUri = uri, srtName = uri?.let { u -> displayName(ctx, u) }) }; refreshDurations() }
 
     fun setWordSrt(uri: Uri?) {
         uri?.let(::persist)
@@ -185,7 +284,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         save()
     }
 
-    fun setVoice(uri: Uri?) { uri?.let(::persist); _state.update { it.copy(audio = it.audio.copy(voiceUri = uri), voiceName = uri?.let { u -> displayName(ctx, u) }) } }
+    fun setVoice(uri: Uri?) { uri?.let(::persist); _state.update { it.copy(audio = it.audio.copy(voiceUri = uri), voiceName = uri?.let { u -> displayName(ctx, u) }) }; refreshDurations() }
     fun setMusic(uri: Uri?) { uri?.let(::persist); _state.update { it.copy(audio = it.audio.copy(musicUri = uri), musicName = uri?.let { u -> displayName(ctx, u) }) } }
 
     fun setSfxFile(uri: Uri?) {
@@ -210,18 +309,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setCaption(c: CaptionSettings) { _state.update { it.copy(caption = c) }; save() }
     fun setEnhance(e: EnhanceSettings) { _state.update { it.copy(enhance = e) }; save() }
 
-    fun setImageSfx(index: Int, sfx: SfxChoice?) = _state.update { s ->
-        s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(sfx = sfx) else im })
+    fun setImageSfx(index: Int, sfx: SfxChoice?) {
+        pushUndo()
+        _state.update { s -> s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(sfx = sfx) else im }) }
     }
 
     fun grantRead(uri: Uri) = persist(uri)
 
-    fun setImageAmbience(index: Int, amb: AmbienceSettings) = _state.update { s ->
-        s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(ambience = amb) else im })
+    fun setImageAmbience(index: Int, amb: AmbienceSettings) {
+        pushUndo()
+        _state.update { s -> s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(ambience = amb) else im }) }
     }
 
-    fun applyAmbienceToAll(amb: AmbienceSettings) = _state.update { s ->
-        s.copy(images = s.images.map { it.copy(ambience = amb) })
+    /** [onlyEmpty] = true leaves scenes that already have a scene sound untouched. */
+    fun applyAmbienceToAll(amb: AmbienceSettings, onlyEmpty: Boolean) {
+        pushUndo()
+        _state.update { s ->
+            s.copy(images = s.images.map { if (onlyEmpty && it.ambience.type != AmbienceType.NONE) it else it.copy(ambience = amb) })
+        }
     }
 
     // ---------------- listen to one scene's voice-over ----------------
@@ -276,29 +381,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
     }
 
-    fun setImageEffect(index: Int, effect: EffectSettings) = _state.update { s ->
-        s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(effect = effect) else im })
+    fun setImageEffect(index: Int, effect: EffectSettings) {
+        pushUndo()
+        _state.update { s -> s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(effect = effect) else im }) }
     }
 
-    /** Copies one image's effect to every image. */
-    fun applyEffectToAll(effect: EffectSettings) = _state.update { s ->
-        s.copy(images = s.images.map { it.copy(effect = effect) })
+    /** Copies one effect to every image. [onlyEmpty] = true leaves scenes that already have an effect untouched. */
+    fun applyEffectToAll(effect: EffectSettings, onlyEmpty: Boolean) {
+        pushUndo()
+        _state.update { s ->
+            s.copy(images = s.images.map { if (onlyEmpty && it.effect.type != EffectType.NONE) it else it.copy(effect = effect) })
+        }
     }
 
-    fun setImageTransition(index: Int, type: TransitionType?) = _state.update { s ->
-        s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(transition = type) else im })
+    fun setImageTransition(index: Int, type: TransitionType?) {
+        pushUndo()
+        _state.update { s -> s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(transition = type) else im }) }
     }
 
-    fun clearOverrides() = _state.update { s -> s.copy(images = s.images.map { it.copy(transition = null) }) }
+    fun clearOverrides() {
+        pushUndo()
+        _state.update { s -> s.copy(images = s.images.map { it.copy(transition = null) }) }
+    }
 
     /** Gives every image its own random transition (no two neighbours the same). */
-    fun shuffleTransitions() = _state.update { s ->
-        var prev: TransitionType? = null
-        s.copy(images = s.images.map {
-            val t = TransitionType.pool.filter { p -> p != prev }.random()
-            prev = t
-            it.copy(transition = t)
-        })
+    fun shuffleTransitions() {
+        pushUndo()
+        _state.update { s ->
+            var prev: TransitionType? = null
+            s.copy(images = s.images.map {
+                val t = TransitionType.pool.filter { p -> p != prev }.random()
+                prev = t
+                it.copy(transition = t)
+            })
+        }
     }
 
     // ---------------- rendering (runs in RenderService) ----------------
