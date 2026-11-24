@@ -58,7 +58,7 @@ class AudioMixer(private val context: Context) {
         var music: DecodedAudioSource? = null
         try {
             val voiceGain: Float = if (a.voiceUri != null && a.voiceBoost)
-                measureVoiceGain(a.voiceUri, voiceUs, cancelled) else 1f
+                measureVoiceGain(a.voiceUri, min(voiceUs, voiceOffsetUs + timeline.totalUs), cancelled) else 1f
             voice = a.voiceUri?.let { DecodedAudioSource(context, it, loop = false) }
             music = a.musicUri?.let { DecodedAudioSource(context, it, loop = a.musicLoop) }
 

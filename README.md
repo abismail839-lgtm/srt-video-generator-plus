@@ -64,3 +64,6 @@ New section 1 (tiles), section 10 App colours (accent + background, remembered).
 
 ## 5.5
 Movement for pop pictures/text: direction, distance, smooth, there-and-back, size change.
+
+## 5.6
+Test render: loudness scan of the voice-over only covers the rendered part (was the whole file, very slow).
