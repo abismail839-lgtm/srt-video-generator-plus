@@ -13,6 +13,7 @@ import android.text.TextPaint
 import com.abulolo.srtvideogenerator.BitmapLoader
 import com.abulolo.srtvideogenerator.PopAnim
 import com.abulolo.srtvideogenerator.PopItem
+import com.abulolo.srtvideogenerator.PopMove
 import com.abulolo.srtvideogenerator.PopKind
 import com.abulolo.srtvideogenerator.PopStyle
 import kotlin.math.PI
@@ -63,6 +64,14 @@ class PopLayer(private val context: Context, private val r: SurfaceRenderer, pri
             }
             PopAnim.FADE -> alpha = a
             PopAnim.TYPEWRITER -> alpha = min(1f, local / 0.1f)
+        }
+        if (item.move != PopMove.NONE || item.moveGrow != 1f) {
+            var pr = (local / item.durSec).coerceIn(0f, 1f)
+            if (item.moveBack) pr = 1f - kotlin.math.abs(2f * pr - 1f)
+            if (item.moveSmooth) pr = pr * pr * (3f - 2f * pr)
+            dx += item.move.dx * item.moveDist * pr
+            dy += item.move.dy * item.moveDist * pr
+            scale *= 1f + (item.moveGrow - 1f) * pr
         }
         alpha *= out * mix
         scale *= 0.9f + 0.1f * out

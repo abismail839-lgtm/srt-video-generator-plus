@@ -61,3 +61,6 @@ Section 1 (files) removed to be rebuilt; version number shown under the title.
 
 ## 5.4
 New section 1 (tiles), section 10 App colours (accent + background, remembered).
+
+## 5.5
+Movement for pop pictures/text: direction, distance, smooth, there-and-back, size change.

@@ -143,6 +143,19 @@ enum class PopAnim(val label: String) {
     TYPEWRITER("Typewriter (text only)")
 }
 
+/** Direction a pop item travels while it is on screen (keyframe-style move from its start position). */
+enum class PopMove(val label: String, val dx: Float, val dy: Float) {
+    NONE("No movement", 0f, 0f),
+    RIGHT("Move right", 1f, 0f),
+    LEFT("Move left", -1f, 0f),
+    UP("Move up", 0f, -1f),
+    DOWN("Move down", 0f, 1f),
+    UP_RIGHT("Move up and right", 0.7071f, -0.7071f),
+    UP_LEFT("Move up and left", -0.7071f, -0.7071f),
+    DOWN_RIGHT("Move down and right", 0.7071f, 0.7071f),
+    DOWN_LEFT("Move down and left", -0.7071f, 0.7071f)
+}
+
 enum class PopStyle(val label: String) {
     PLAIN("Plain white"),
     BOLD_YELLOW("Bold yellow"),
@@ -176,7 +189,15 @@ data class PopItem(
     val color: Int = 0,
     val sound: SfxChoice = SfxChoice.POP,
     val soundVolume: Float = 0.25f,
-    val soundUri: Uri? = null
+    val soundUri: Uri? = null,
+    /** Movement: starts at [x],[y], travels [moveDist] (fraction of the frame) in [move] direction over the time it is shown. */
+    val move: PopMove = PopMove.NONE,
+    val moveDist: Float = 0.3f,
+    val moveSmooth: Boolean = true,
+    /** true = goes there and comes back. */
+    val moveBack: Boolean = false,
+    /** Size at the end of the move relative to the start (1 = unchanged). */
+    val moveGrow: Float = 1f
 )
 
 data class ImageItem(

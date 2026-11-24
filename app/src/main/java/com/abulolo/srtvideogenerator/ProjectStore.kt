@@ -93,7 +93,9 @@ class ProjectStore(context: Context) {
                         .put("an", p.anim.name).put("s", p.startSec.toDouble()).put("d", p.durSec.toDouble())
                         .put("x", p.x.toDouble()).put("y", p.y.toDouble()).put("z", p.size.toDouble())
                         .put("r", p.rotation.toDouble()).put("c", p.color).put("snd", p.sound.name)
-                        .put("sv", p.soundVolume.toDouble()).apply {
+                        .put("sv", p.soundVolume.toDouble())
+                        .put("mv", p.move.name).put("md", p.moveDist.toDouble()).put("ms", p.moveSmooth)
+                        .put("mb", p.moveBack).put("mg", p.moveGrow.toDouble()).apply {
                             p.imageUri?.let { put("iu", it.toString()) }
                             p.imageName?.let { put("in", it) }
                             p.soundUri?.let { put("su", it.toString()) }
@@ -126,7 +128,10 @@ class ProjectStore(context: Context) {
                     y = p.optDouble("y", 0.5).toFloat(), size = p.optDouble("z", 1.0).toFloat(),
                     rotation = p.optDouble("r", 0.0).toFloat(), color = p.optInt("c", 0),
                     sound = p.getEnum("snd", SfxChoice.POP), soundVolume = p.optDouble("sv", 0.25).toFloat(),
-                    soundUri = p.getUri("su")
+                    soundUri = p.getUri("su"),
+                    move = p.getEnum("mv", PopMove.NONE), moveDist = p.optDouble("md", 0.3).toFloat(),
+                    moveSmooth = p.optBoolean("ms", true), moveBack = p.optBoolean("mb", false),
+                    moveGrow = p.optDouble("mg", 1.0).toFloat()
                 )
             }
             list += ImageItem(

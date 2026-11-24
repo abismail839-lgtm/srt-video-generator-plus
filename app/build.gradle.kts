@@ -14,8 +14,8 @@ android {
         applicationId = "com.abulolo.srtvideogenerator"
         minSdk = 29
         targetSdk = 35
-        versionCode = 12
-        versionName = "5.4"
+        versionCode = 13
+        versionName = "5.5"
     }
 
     // Fixed signing key kept in the repo, so every build is signed the same way

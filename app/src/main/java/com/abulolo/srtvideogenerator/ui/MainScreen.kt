@@ -85,6 +85,7 @@ import com.abulolo.srtvideogenerator.UiState
 import com.abulolo.srtvideogenerator.WatermarkCorner
 import com.abulolo.srtvideogenerator.PopAnim
 import com.abulolo.srtvideogenerator.PopItem
+import com.abulolo.srtvideogenerator.PopMove
 import com.abulolo.srtvideogenerator.PopKind
 import com.abulolo.srtvideogenerator.PopStyle
 import java.util.Locale
@@ -1001,6 +1002,18 @@ private fun PopDialog(vm: MainViewModel, scene: Int, initial: PopItem, onClose: 
                 LabeledSlider("Left to right", "${(p.x * 100).roundToInt()}%", p.x, 0f..1f) { p = p.copy(x = (it * 100).roundToInt() / 100f) }
                 LabeledSlider("Up to down", "${(p.y * 100).roundToInt()}%", p.y, 0f..1f) { p = p.copy(y = (it * 100).roundToInt() / 100f) }
                 LabeledSlider("Tilt", "${p.rotation.roundToInt()}°", p.rotation, -45f..45f) { p = p.copy(rotation = it.roundToInt().toFloat()) }
+
+                Text("Movement (keyframe style)", style = MaterialTheme.typography.titleSmall)
+                Dropdown("Move", p.move.label, PopMove.entries, { it.label }) { p = p.copy(move = it) }
+                if (p.move != PopMove.NONE) {
+                    LabeledSlider("How far", "${(p.moveDist * 100).roundToInt()}%", p.moveDist, 0.05f..0.9f) { p = p.copy(moveDist = (it * 100).roundToInt() / 100f) }
+                    LabeledSwitch("Smooth start and stop", p.moveSmooth) { p = p.copy(moveSmooth = it) }
+                    LabeledSwitch("Go there and come back", p.moveBack) { p = p.copy(moveBack = it) }
+                }
+                LabeledSlider("Size change while moving", if (p.moveGrow == 1f) "none" else "${(p.moveGrow * 100).roundToInt()}% at the end", p.moveGrow, 0.4f..2f) {
+                    p = p.copy(moveGrow = if (kotlin.math.abs(it - 1f) < 0.04f) 1f else (it * 20).roundToInt() / 20f)
+                }
+                Text("It starts at the position above and travels during the whole time it stays.", style = MaterialTheme.typography.bodySmall)
 
                 Text("Sound when it pops", style = MaterialTheme.typography.titleSmall)
                 Dropdown(
