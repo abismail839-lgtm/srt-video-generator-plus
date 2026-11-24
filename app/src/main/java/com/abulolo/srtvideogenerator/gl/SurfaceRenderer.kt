@@ -1,4 +1,4 @@
-package com.bahaa.srtvideogenerator.gl
+package com.abulolo.srtvideogenerator.gl
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -11,9 +11,9 @@ import android.opengl.GLUtils
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
-import com.bahaa.srtvideogenerator.CaptionPosition
-import com.bahaa.srtvideogenerator.CaptionPreset
-import com.bahaa.srtvideogenerator.CaptionSettings
+import com.abulolo.srtvideogenerator.CaptionPosition
+import com.abulolo.srtvideogenerator.CaptionPreset
+import com.abulolo.srtvideogenerator.CaptionSettings
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer

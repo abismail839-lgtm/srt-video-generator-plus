@@ -1,6 +1,6 @@
-package com.bahaa.srtvideogenerator.audio
+package com.abulolo.srtvideogenerator.audio
 
-import com.bahaa.srtvideogenerator.AmbienceType
+import com.abulolo.srtvideogenerator.AmbienceType
 import java.util.Random
 import kotlin.math.PI
 import kotlin.math.abs

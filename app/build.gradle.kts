@@ -5,17 +5,17 @@ plugins {
 }
 
 android {
-    namespace = "com.bahaa.srtvideogenerator"
+    namespace = "com.abulolo.srtvideogenerator"
     compileSdk = 35
 
     defaultConfig {
         // Different id so it installs NEXT TO the original app instead of failing
         // (an APK with the same id but a different signing key cannot update the original).
-        applicationId = "com.bahaa.srtvideogenerator.upgraded"
+        applicationId = "com.abulolo.srtvideogenerator"
         minSdk = 29
         targetSdk = 35
-        versionCode = 9
-        versionName = "5.1"
+        versionCode = 10
+        versionName = "5.2"
     }
 
     // Fixed signing key kept in the repo, so every build is signed the same way

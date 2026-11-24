@@ -1,4 +1,4 @@
-package com.bahaa.srtvideogenerator.audio
+package com.abulolo.srtvideogenerator.audio
 
 import android.content.Context
 import android.media.AudioFormat

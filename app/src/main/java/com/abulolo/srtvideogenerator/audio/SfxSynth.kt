@@ -1,7 +1,7 @@
-package com.bahaa.srtvideogenerator.audio
+package com.abulolo.srtvideogenerator.audio
 
-import com.bahaa.srtvideogenerator.SfxChoice
-import com.bahaa.srtvideogenerator.TransitionType
+import com.abulolo.srtvideogenerator.SfxChoice
+import com.abulolo.srtvideogenerator.TransitionType
 import java.util.Random
 import kotlin.math.PI
 import kotlin.math.abs

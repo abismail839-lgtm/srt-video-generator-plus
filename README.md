@@ -1,7 +1,7 @@
 # HU Video Maker (reconstruction of SRT Video Generator)
 
 NEW code written from the APK findings. It is NOT the original app's code and was NOT built or tested
-on a device yet. Installs next to the original (id: com.bahaa.srtvideogenerator.upgraded).
+on a device yet. Own app id: com.abulolo.srtvideogenerator.
 
 ## Build on your phone (no computer)
 1. Create an empty repo on github.com (browser).

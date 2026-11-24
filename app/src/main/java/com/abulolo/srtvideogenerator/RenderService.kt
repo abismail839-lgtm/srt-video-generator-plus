@@ -1,4 +1,4 @@
-package com.bahaa.srtvideogenerator
+package com.abulolo.srtvideogenerator
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -180,7 +180,7 @@ class RenderService : Service() {
     }
 
     companion object {
-        const val ACTION_CANCEL = "com.bahaa.srtvideogenerator.CANCEL"
+        const val ACTION_CANCEL = "com.abulolo.srtvideogenerator.CANCEL"
         private const val CHANNEL = "render"
         private const val NOTIF_ID = 41
     }

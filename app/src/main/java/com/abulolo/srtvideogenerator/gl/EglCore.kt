@@ -1,4 +1,4 @@
-package com.bahaa.srtvideogenerator.gl
+package com.abulolo.srtvideogenerator.gl
 
 import android.opengl.EGL14
 import android.opengl.EGLConfig

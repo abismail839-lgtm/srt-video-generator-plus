@@ -1,4 +1,4 @@
-package com.bahaa.srtvideogenerator
+package com.abulolo.srtvideogenerator
 
 import android.content.ContentValues
 import android.content.Context
@@ -14,11 +14,11 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.net.Uri
 import android.provider.MediaStore
-import com.bahaa.srtvideogenerator.audio.AudioMixer
-import com.bahaa.srtvideogenerator.gl.EglCore
-import com.bahaa.srtvideogenerator.gl.GlTexture
-import com.bahaa.srtvideogenerator.gl.PopLayer
-import com.bahaa.srtvideogenerator.gl.SurfaceRenderer
+import com.abulolo.srtvideogenerator.audio.AudioMixer
+import com.abulolo.srtvideogenerator.gl.EglCore
+import com.abulolo.srtvideogenerator.gl.GlTexture
+import com.abulolo.srtvideogenerator.gl.PopLayer
+import com.abulolo.srtvideogenerator.gl.SurfaceRenderer
 import java.io.File
 import java.nio.ByteBuffer
 import kotlin.math.exp

@@ -1,13 +1,13 @@
-package com.bahaa.srtvideogenerator.audio
+package com.abulolo.srtvideogenerator.audio
 
 import android.content.Context
-import com.bahaa.srtvideogenerator.AmbienceSettings
-import com.bahaa.srtvideogenerator.AmbienceType
-import com.bahaa.srtvideogenerator.AudioSettings
-import com.bahaa.srtvideogenerator.PopItem
-import com.bahaa.srtvideogenerator.PopKind
-import com.bahaa.srtvideogenerator.SfxChoice
-import com.bahaa.srtvideogenerator.Timeline
+import com.abulolo.srtvideogenerator.AmbienceSettings
+import com.abulolo.srtvideogenerator.AmbienceType
+import com.abulolo.srtvideogenerator.AudioSettings
+import com.abulolo.srtvideogenerator.PopItem
+import com.abulolo.srtvideogenerator.PopKind
+import com.abulolo.srtvideogenerator.SfxChoice
+import com.abulolo.srtvideogenerator.Timeline
 import android.net.Uri
 import java.io.File
 import kotlin.math.abs

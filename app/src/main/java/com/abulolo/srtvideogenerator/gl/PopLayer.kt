@@ -1,4 +1,4 @@
-package com.bahaa.srtvideogenerator.gl
+package com.abulolo.srtvideogenerator.gl
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -10,11 +10,11 @@ import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
-import com.bahaa.srtvideogenerator.BitmapLoader
-import com.bahaa.srtvideogenerator.PopAnim
-import com.bahaa.srtvideogenerator.PopItem
-import com.bahaa.srtvideogenerator.PopKind
-import com.bahaa.srtvideogenerator.PopStyle
+import com.abulolo.srtvideogenerator.BitmapLoader
+import com.abulolo.srtvideogenerator.PopAnim
+import com.abulolo.srtvideogenerator.PopItem
+import com.abulolo.srtvideogenerator.PopKind
+import com.abulolo.srtvideogenerator.PopStyle
 import kotlin.math.PI
 import kotlin.math.ceil
 import kotlin.math.exp

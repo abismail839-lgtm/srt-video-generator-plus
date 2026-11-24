@@ -1,4 +1,4 @@
-package com.bahaa.srtvideogenerator
+package com.abulolo.srtvideogenerator
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -9,7 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import com.bahaa.srtvideogenerator.ui.SrtVideoGeneratorScreen
+import com.abulolo.srtvideogenerator.ui.SrtVideoGeneratorScreen
 
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()

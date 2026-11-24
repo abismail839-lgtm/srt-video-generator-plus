@@ -1,13 +1,13 @@
-package com.bahaa.srtvideogenerator.ui
+package com.abulolo.srtvideogenerator.ui
 
 import android.content.Context
 import android.graphics.Bitmap
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.os.SystemClock
-import com.bahaa.srtvideogenerator.TransitionType
-import com.bahaa.srtvideogenerator.gl.GlTexture
-import com.bahaa.srtvideogenerator.gl.SurfaceRenderer
+import com.abulolo.srtvideogenerator.TransitionType
+import com.abulolo.srtvideogenerator.gl.GlTexture
+import com.abulolo.srtvideogenerator.gl.SurfaceRenderer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 

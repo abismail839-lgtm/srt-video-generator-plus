@@ -1,4 +1,4 @@
-package com.bahaa.srtvideogenerator
+package com.abulolo.srtvideogenerator
 
 import android.app.Application
 import android.content.Context
