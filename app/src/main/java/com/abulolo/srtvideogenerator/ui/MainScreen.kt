@@ -145,7 +145,15 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { Text("HU Video Maker", style = MaterialTheme.typography.headlineSmall) }
+        item {
+            val ver = remember {
+                try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "" } catch (e: Exception) { "" }
+            }
+            Column {
+                Text("HU Video Maker", style = MaterialTheme.typography.headlineSmall)
+                if (ver.isNotEmpty()) Text("v$ver", style = MaterialTheme.typography.bodySmall)
+            }
+        }
 
         item {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -166,20 +174,7 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
             }
         }
 
-        // ---------------- files ----------------
-        item {
-            Section("1. Files") {
-                FileRow("Images and video clips", if (s.images.isEmpty()) null else (s.imageSource ?: "${s.images.size} images"),
-                    { imagePicker.launch(arrayOf("image/*", "video/*")) }, null)
-                OutlinedButton(onClick = { folderPicker.launch(null) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Choose a whole folder (images and clips)")
-                }
-                FileRow("SRT subtitles", s.srtName, { srtPicker.launch(arrayOf("*/*")) }, if (s.srtUri != null) ({ vm.setSrt(null) }) else null)
-                FileRow("Voice-over (optional)", s.voiceName, { audioPicker.launch(arrayOf("audio/*")) }, if (s.audio.voiceUri != null) ({ vm.setVoice(null) }) else null)
-                FileRow("Word-by-word SRT (optional)", s.wordSrtName, { wordPicker.launch(arrayOf("*/*")) }, if (s.wordSrtUri != null) ({ vm.setWordSrt(null) }) else null)
-                LabeledSwitch("Also show full subtitles", s.showSubtitles) { vm.setShowSubtitles(it) }
-            }
-        }
+        // Section 1 (files) intentionally removed - to be rebuilt as a new section.
 
         // ---------------- video ----------------
         item {
