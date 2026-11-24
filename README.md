@@ -58,3 +58,6 @@ If the build fails, copy the red error lines from the Actions log and send them 
 
 ## 5.3
 Section 1 (files) removed to be rebuilt; version number shown under the title.
+
+## 5.4
+New section 1 (tiles), section 10 App colours (accent + background, remembered).

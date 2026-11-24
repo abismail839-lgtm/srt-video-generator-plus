@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -68,6 +69,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.abulolo.srtvideogenerator.AmbienceSettings
+import com.abulolo.srtvideogenerator.AppTheme
+import androidx.compose.foundation.shape.CircleShape
 import com.abulolo.srtvideogenerator.AmbienceType
 import com.abulolo.srtvideogenerator.AudioSettings
 import com.abulolo.srtvideogenerator.displayName
@@ -174,7 +177,52 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
             }
         }
 
-        // Section 1 (files) intentionally removed - to be rebuilt as a new section.
+        // ---------------- 1. your story (own design: tiles) ----------------
+        item {
+            var pickPictures by remember { mutableStateOf(false) }
+            Section("1. Your story") {
+                Text("Tap a tile to add it. A ticked tile is ready.", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StoryTile("🖼", "Pictures", if (s.images.isEmpty()) null else (s.imageSource ?: "${s.images.size} scenes"),
+                        Modifier.weight(1f), { pickPictures = true }, null)
+                    StoryTile("🎙", "Voice-over", s.voiceName, Modifier.weight(1f),
+                        { audioPicker.launch(arrayOf("audio/*")) }, if (s.audio.voiceUri != null) ({ vm.setVoice(null) }) else null)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StoryTile("📝", "Subtitles (SRT)", s.srtName, Modifier.weight(1f),
+                        { srtPicker.launch(arrayOf("*/*")) }, if (s.srtUri != null) ({ vm.setSrt(null) }) else null)
+                    StoryTile("✨", "Word by word", s.wordSrtName, Modifier.weight(1f),
+                        { wordPicker.launch(arrayOf("*/*")) }, if (s.wordSrtUri != null) ({ vm.setWordSrt(null) }) else null)
+                }
+                Text("Full subtitles on the video", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.FilterChip(selected = s.showSubtitles, onClick = { vm.setShowSubtitles(true) }, label = { Text("Show") })
+                    androidx.compose.material3.FilterChip(selected = !s.showSubtitles, onClick = { vm.setShowSubtitles(false) }, label = { Text("Hide") })
+                }
+                val missing = buildList {
+                    if (s.images.isEmpty()) add("pictures")
+                    if (s.srtUri == null) add("subtitles (SRT)")
+                }
+                Text(
+                    if (missing.isEmpty()) "✓ Ready to render" else "Still needed: " + missing.joinToString(", "),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (missing.isEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (pickPictures) {
+                AlertDialog(
+                    onDismissRequest = { pickPictures = false },
+                    title = { Text("Add pictures") },
+                    text = { Text("Pick single pictures and clips, or a whole folder (loaded in name order).") },
+                    confirmButton = {
+                        TextButton(onClick = { pickPictures = false; imagePicker.launch(arrayOf("image/*", "video/*")) }) { Text("Pick pictures") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pickPictures = false; folderPicker.launch(null) }) { Text("Pick a folder") }
+                    }
+                )
+            }
+        }
 
         // ---------------- video ----------------
         item {
@@ -348,6 +396,24 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                     OutlinedButton(onClick = { backupOpener.launch(arrayOf("*/*")) }, modifier = Modifier.weight(1f)) { Text("Restore backup") }
                 }
                 s.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+
+        // ---------------- app colours ----------------
+        item {
+            Section("10. App colours") {
+                Text("Accent colour (buttons, sliders, highlights)", style = MaterialTheme.typography.bodySmall)
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    itemsIndexed(AppTheme.accents) { i, c ->
+                        ColourDot(c.color, AppTheme.accentIndex == i) { AppTheme.accentIndex = i; AppTheme.save(ctx) }
+                    }
+                }
+                Text("Background", style = MaterialTheme.typography.bodySmall)
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    itemsIndexed(AppTheme.backgrounds) { i, c ->
+                        ColourDot(c.color, AppTheme.backgroundIndex == i) { AppTheme.backgroundIndex = i; AppTheme.save(ctx) }
+                    }
+                }
             }
         }
 
@@ -950,4 +1016,33 @@ private fun PopDialog(vm: MainViewModel, scene: Int, initial: PopItem, onClose: 
             }
         }
     )
+}
+
+@Composable
+private fun ColourDot(color: Color, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.size(40.dp).clip(CircleShape).background(color)
+            .border(if (selected) 3.dp else 1.dp, if (selected) MaterialTheme.colorScheme.onSurface else Color(0x66888888), CircleShape)
+            .clickable(onClick = onClick)
+    )
+}
+
+@Composable
+private fun StoryTile(icon: String, title: String, value: String?, modifier: Modifier, onTap: () -> Unit, onClear: (() -> Unit)?) {
+    val filled = value != null
+    val line = if (filled) MaterialTheme.colorScheme.primary else Color(0x66888888)
+    Box(
+        modifier.height(104.dp).clip(RoundedCornerShape(16.dp))
+            .border(if (filled) 2.dp else 1.dp, line, RoundedCornerShape(16.dp))
+            .clickable(onClick = onTap).padding(10.dp)
+    ) {
+        Column(Modifier.align(Alignment.CenterStart), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(if (filled) "$icon  ✓" else "$icon  +", style = MaterialTheme.typography.titleMedium)
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(value ?: "tap to add", style = MaterialTheme.typography.bodySmall, maxLines = 1)
+        }
+        if (onClear != null) {
+            Text("✕", Modifier.align(Alignment.TopEnd).clickable(onClick = onClear).padding(4.dp), style = MaterialTheme.typography.titleMedium)
+        }
+    }
 }
