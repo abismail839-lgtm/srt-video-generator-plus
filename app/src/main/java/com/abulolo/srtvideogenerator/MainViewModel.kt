@@ -194,6 +194,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refreshDurations()
     }
 
+    /** Swaps the picture or clip of one scene; all its settings (effect, pops, sounds, transition) stay. */
+    fun replaceImage(index: Int, uri: Uri?) {
+        if (uri == null) return
+        persist(uri)
+        pushUndo()
+        val name = displayName(ctx, uri)
+        val video = BitmapLoader.isVideo(ctx, uri)
+        _state.update { s ->
+            s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(uri = uri, name = name, isVideo = video) else im },
+                resultUri = null)
+        }
+        refreshDurations()
+    }
+
     /** Pictures you pick again keep the settings you gave them before. */
     private fun mergeSettings(old: List<ImageItem>, fresh: List<ImageItem>): List<ImageItem> {
         val byUri = old.associateBy { it.uri.toString() }

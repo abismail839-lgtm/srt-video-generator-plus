@@ -621,6 +621,14 @@ private fun EffectDialog(vm: MainViewModel, index: Int, onAll: (EffectSettings) 
                             e = e.copy(onlyFirstSec = (it * 2).roundToInt() / 2f)
                         }
                     }
+                    if (e.type != EffectType.SHAKE && e.type != EffectType.ZOOM_PULSE) {
+                        Text("Size and place of the effect", style = MaterialTheme.typography.titleSmall)
+                        TextButton(onClick = { e = e.copy(regionX = 0.5f, regionY = 0.5f, regionW = 1f, regionH = 1f) }) { Text("Fill the whole screen") }
+                        LabeledSlider("Width", "${(e.regionW * 100).roundToInt()}%", e.regionW, 0.1f..1f) { e = e.copy(regionW = (it * 100).roundToInt() / 100f) }
+                        LabeledSlider("Height", "${(e.regionH * 100).roundToInt()}%", e.regionH, 0.1f..1f) { e = e.copy(regionH = (it * 100).roundToInt() / 100f) }
+                        LabeledSlider("Left to right", "${(e.regionX * 100).roundToInt()}%", e.regionX, 0f..1f) { e = e.copy(regionX = (it * 100).roundToInt() / 100f) }
+                        LabeledSlider("Up to down", "${(e.regionY * 100).roundToInt()}%", e.regionY, 0f..1f) { e = e.copy(regionY = (it * 100).roundToInt() / 100f) }
+                    }
                 }
             }
         }
@@ -796,6 +804,7 @@ private fun SceneEditor(
     val bmp by produceState<Bitmap?>(null, img.uri) {
         value = withContext(Dispatchers.IO) { try { BitmapLoader.decode(ctx, img.uri, 640) } catch (_: Exception) { null } }
     }
+    val replacePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { vm.replaceImage(index, it) }
     Section("Edit scene ${index + 1} of ${s.images.size}") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { onSelect((index - 1).coerceAtLeast(0)) }, enabled = index > 0) { Text("◀ Back") }
@@ -806,6 +815,9 @@ private fun SceneEditor(
             "${if (img.isVideo) "🎬 " else ""}${img.name}" + (s.sceneSecs.getOrNull(index)?.let { "  ·  %.1f s".format(it) } ?: ""),
             style = MaterialTheme.typography.bodyMedium, maxLines = 1
         )
+        OutlinedButton(onClick = { replacePicker.launch(arrayOf("image/*", "video/*")) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Replace this scene's picture (keeps all its settings)")
+        }
         val b = bmp
         if (b != null) {
             key(index, b) {

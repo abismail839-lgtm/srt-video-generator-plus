@@ -67,3 +67,6 @@ Movement for pop pictures/text: direction, distance, smooth, there-and-back, siz
 
 ## 5.6
 Test render: loudness scan of the voice-over only covers the rendered part (was the whole file, very slow).
+
+## 5.7
+Flying birds effect; every overlay effect can be sized and placed; replace the picture of a scene.

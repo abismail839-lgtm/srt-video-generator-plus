@@ -176,20 +176,29 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
     }
 
     /** Draws an overlay effect (EffectType ordinal 1..9) over the current frame. */
-    fun drawOverlay(effect: Int, intensity: Float, timeSec: Float, alpha: Float) {
+    fun drawOverlay(
+        effect: Int, intensity: Float, timeSec: Float, alpha: Float,
+        rx: Float = 0.5f, ry: Float = 0.5f, rw: Float = 1f, rh: Float = 1f
+    ) {
         // 10 = screen shake and 11 = zoom pulse are done by moving the picture, not by this shader
-        if (effect <= 0 || effect == 10 || effect == 11 || effect > 26 || alpha <= 0.001f) return
+        if (effect <= 0 || effect == 10 || effect == 11 || effect > 27 || alpha <= 0.001f) return
         GLES20.glViewport(0, 0, width, height)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         GLES20.glUseProgram(ovProgram)
         fun u(name: String) = ovCache.getOrPut(name) { GLES20.glGetUniformLocation(ovProgram, name) }
-        GLES20.glUniform4f(u("uRect"), -1f, -1f, 1f, 1f)
+        val w0 = rw.coerceIn(0.05f, 1f)
+        val h0 = rh.coerceIn(0.05f, 1f)
+        val left = 2f * (rx - w0 / 2f) - 1f
+        val right = 2f * (rx + w0 / 2f) - 1f
+        val top = 1f - 2f * (ry - h0 / 2f)
+        val bottom = 1f - 2f * (ry + h0 / 2f)
+        GLES20.glUniform4f(u("uRect"), left, bottom, right, top)
         GLES20.glUniform1i(u("uEffect"), effect)
         GLES20.glUniform1f(u("uIntensity"), intensity.coerceIn(0f, 1f))
         GLES20.glUniform1f(u("uTime"), timeSec)
         GLES20.glUniform1f(u("uAlpha"), alpha.coerceIn(0f, 1f))
-        GLES20.glUniform1f(u("uAspect"), width.toFloat() / height)
+        GLES20.glUniform1f(u("uAspect"), (width * w0) / (height * h0))
         drawQuad(ovProgram)
         GLES20.glDisable(GLES20.GL_BLEND)
     }
@@ -657,6 +666,26 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
                     float h = 0.08 + 0.07 * I;
                     float a = max(step(uv.y, h), step(1.0 - h, uv.y));
                     over(acc, vec3(0.0), a);
+                } else if (uEffect == 27) {               // flying birds
+                    float flock = 0.0;
+                    for (int bi = 0; bi < 8; bi++) {
+                        float fi = float(bi);
+                        float seed = hash(vec2(fi, 3.7));
+                        float spd = 0.30 + 0.30 * hash(vec2(fi, 9.1));
+                        float ph = fract(t * spd + seed);
+                        float bx = (mod(fi, 2.0) > 0.5) ? (1.15 - 1.3 * ph) : (-0.15 + 1.3 * ph);
+                        float by = 0.15 + 0.55 * hash(vec2(fi, 5.3)) + 0.03 * sin(t * 1.3 + fi * 2.0);
+                        float sz = 0.045 + 0.04 * hash(vec2(fi, 1.9));
+                        vec2 bp = (uv - vec2(bx, by)) * vec2(uAspect, 1.0) / sz;
+                        float flap = sin(t * (7.0 + 3.0 * seed) + fi * 1.7) * 0.5;
+                        float yw = flap * abs(bp.x);
+                        float th = 0.16 * (1.0 - abs(bp.x) * 0.8);
+                        float m = (1.0 - smoothstep(th * 0.5, max(th, 0.02), abs(bp.y - yw))) * step(abs(bp.x), 1.2);
+                        m = max(m, 1.0 - smoothstep(0.1, 0.2, length(bp * vec2(1.0, 2.0))));
+                        float show = step(fi, 1.0 + I * 6.0);
+                        flock = max(flock, m * show);
+                    }
+                    over(acc, vec3(0.04, 0.04, 0.05), flock * 0.9);
                 }
                 gl_FragColor = acc * uAlpha;
             }

@@ -93,7 +93,8 @@ enum class EffectType(val label: String) {
     SEPIA("Sepia old photo"),
     SMOKE("Drifting smoke"),
     CANDLE("Candlelight flicker"),
-    LETTERBOX("Cinema black bars")
+    LETTERBOX("Cinema black bars"),
+    BIRDS("Flying birds")
 }
 
 /**
@@ -104,7 +105,12 @@ data class EffectSettings(
     val type: EffectType = EffectType.NONE,
     val intensity: Float = 0.6f,
     val speed: Float = 1f,
-    val onlyFirstSec: Float? = null
+    val onlyFirstSec: Float? = null,
+    /** Where the effect is drawn: centre and size as fractions of the frame (1 x 1 = whole screen). */
+    val regionX: Float = 0.5f,
+    val regionY: Float = 0.5f,
+    val regionW: Float = 1f,
+    val regionH: Float = 1f
 )
 
 /** Sound that plays under one scene (not a transition sound). */
