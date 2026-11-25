@@ -9,6 +9,15 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -141,47 +150,58 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
             )
         }
     }
+    var tab by rememberSaveable { mutableStateOf(0) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     var applyAllEffect by remember { mutableStateOf<EffectSettings?>(null) }
     var applyAllAmbience by remember { mutableStateOf<AmbienceSettings?>(null) }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().statusBarsPadding(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            val ver = remember {
-                try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "" } catch (e: Exception) { "" }
+    if (showSettings) {
+        androidx.activity.compose.BackHandler { showSettings = false }
+        SettingsPage(
+            s = s, onBack = { showSettings = false },
+            onSaveBackup = { backupSaver.launch("HU_project_backup.json") },
+            onRestoreBackup = { backupOpener.launch(arrayOf("*/*")) },
+            onNewProject = { confirm = "Start a new project? Your pictures and per-scene settings will be cleared (you can still Undo)." to { vm.newProject(); showSettings = false } }
+        )
+    } else Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        val ver = remember {
+            try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "" } catch (e: Exception) { "" }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("HU Video Maker", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                if (ver.isNotEmpty()) Text("v$ver", style = MaterialTheme.typography.labelSmall)
             }
-            Column {
-                Text("HU Video Maker", style = MaterialTheme.typography.headlineSmall)
-                if (ver.isNotEmpty()) Text("v$ver", style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = { vm.undo() }, enabled = s.undoCount > 0) { Text("↩ ${s.undoCount}") }
+            TextButton(onClick = { showSettings = true }) { Text("⚙") }
+            Button(onClick = { tab = 4; startRender() }, enabled = !s.rendering && s.images.isNotEmpty()) { Text("Export") }
+        }
+        if (s.rendering) {
+            LinearProgressIndicator(progress = { s.progress }, modifier = Modifier.fillMaxWidth())
+        }
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+        if (tab == 0) {
+        item {
+            if (s.images.isNotEmpty()) {
+                val total = s.totalSecs.roundToInt()
+                Text(
+                    "${s.images.size} scenes" + (if (s.sceneSecs.isNotEmpty()) " · total ${total / 60}:${"%02d".format(total % 60)}" else "") +
+                        " · your work is saved automatically",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
-
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { vm.undo() }, enabled = s.undoCount > 0) { Text("↩ Undo (${s.undoCount})") }
-                    OutlinedButton(onClick = {
-                        confirm = "Start a new project? Your pictures and per-scene settings will be cleared (you can still Undo)." to { vm.newProject() }
-                    }, enabled = s.images.isNotEmpty()) { Text("New project") }
-                }
-                if (s.images.isNotEmpty()) {
-                    val total = s.totalSecs.roundToInt()
-                    Text(
-                        "${s.images.size} scenes" + (if (s.sceneSecs.isNotEmpty()) " · total ${total / 60}:${"%02d".format(total % 60)}" else "") +
-                            " · your work is saved automatically",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-        }
-
         // ---------------- 1. your story (own design: tiles) ----------------
         item {
             var pickPictures by remember { mutableStateOf(false) }
-            Section("1. Your story") {
+            Section("Your story") {
                 Text("Tap a tile to add it. A ticked tile is ready.", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     StoryTile("🖼", "Pictures", if (s.images.isEmpty()) null else (s.imageSource ?: "${s.images.size} scenes"),
@@ -227,16 +247,57 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
 
         // ---------------- video ----------------
         item {
-            Section("2. Video") {
+            Section("Video") {
                 Dropdown("Size", s.resolution.label, Resolution.entries, { it.label }) { vm.setResolution(it) }
                 Dropdown("Frame rate (24 renders faster)", "${s.fps} fps", listOf(24, 30), { "$it fps" }) { vm.setFps(it) }
                 Dropdown("Zoom effect", s.zoomMode.label, ZoomMode.entries, { it.label }) { vm.setZoom(it) }
             }
         }
 
+        }
+
+        if (tab == 1) {
+        // ---------------- scenes tab ----------------
+        if (s.images.isNotEmpty()) {
+            item {
+                ScenePlayer(
+                    vm = vm, s = s, index = selected.coerceIn(0, s.images.lastIndex),
+                    onFollow = { selected = it }
+                )
+            }
+            item {
+                SceneGrid(
+                    s = s, selected = selected.coerceIn(0, s.images.lastIndex),
+                    onPick = { i ->
+                        selected = i
+                        s.sceneStartsMs.getOrNull(i)?.let { vm.seekAll(it) }
+                    }
+                )
+            }
+            item {
+                SceneEditor(
+                    vm = vm, s = s, index = selected.coerceIn(0, s.images.lastIndex),
+                    onSelect = { i -> selected = i; s.sceneStartsMs.getOrNull(i)?.let { vm.seekAll(it) } },
+                    onEffect = { effectIndex = it },
+                    onAmbience = { ambienceIndex = it },
+                    onPreview = { previewIndex = it },
+                    onConfirm = { msg, action -> confirm = msg to action },
+                    onAddPopText = { idx ->
+                        popEdit = idx to PopItem(id = System.nanoTime(), kind = PopKind.TEXT, text = "Your text", size = 1f)
+                    },
+                    onAddPopImage = { idx -> pickForScene = idx; popImagePicker.launch(arrayOf("image/*")) },
+                    onEditPop = { idx, pop -> popEdit = idx to pop }
+                )
+            }
+        } else {
+            item { Text("Add your pictures first (Story tab), then your scenes appear here.") }
+        }
+        }
+
+        if (tab == 2) {
         // ---------------- transitions ----------------
         item {
-            Section("3. Transitions") {
+            Section("Transitions") {
                 LabeledSwitch("Enable transitions", s.transitions.enabled) { vm.setTransitions(s.transitions.copy(enabled = it)) }
                 if (s.transitions.enabled) {
                     Dropdown("Default for all images", s.transitions.default.label, TransitionType.entries, { it.label }) {
@@ -261,34 +322,63 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
             }
         }
 
-        // ---------------- scene editor ----------------
-        if (s.images.isNotEmpty()) {
-            item {
-                SceneStrip(
-                    s = s, selected = selected.coerceIn(0, s.images.lastIndex),
-                    onSelect = { selected = it }
-                )
-            }
-            item {
-                SceneEditor(
-                    vm = vm, s = s, index = selected.coerceIn(0, s.images.lastIndex),
-                    onSelect = { selected = it },
-                    onEffect = { effectIndex = it },
-                    onAmbience = { ambienceIndex = it },
-                    onPreview = { previewIndex = it },
-                    onConfirm = { msg, action -> confirm = msg to action },
-                    onAddPopText = { idx ->
-                        popEdit = idx to PopItem(id = System.nanoTime(), kind = PopKind.TEXT, text = "Your text", size = 1f)
-                    },
-                    onAddPopImage = { idx -> pickForScene = idx; popImagePicker.launch(arrayOf("image/*")) },
-                    onEditPop = { idx, pop -> popEdit = idx to pop }
-                )
+        // ---------------- subtitle style ----------------
+        item {
+            Section("Subtitle style") {
+                Dropdown("Style", s.caption.preset.label, CaptionPreset.entries, { it.label }) {
+                    vm.setCaption(s.caption.copy(preset = it))
+                }
+                LabeledSlider("Text size", "${(s.caption.sizeScale * 100).roundToInt()}%", s.caption.sizeScale, 0.6f..1.6f) {
+                    vm.setCaption(s.caption.copy(sizeScale = (it * 20).roundToInt() / 20f))
+                }
+                Dropdown("Position", s.caption.position.label, CaptionPosition.entries, { it.label }) {
+                    vm.setCaption(s.caption.copy(position = it))
+                }
             }
         }
 
+        // ---------------- enhance ----------------
+        item {
+            Section("Sharpen and colour") {
+                LabeledSlider("Sharpness", "${(s.enhance.sharpness * 100).roundToInt()}%", s.enhance.sharpness, 0f..1f) {
+                    vm.setEnhance(s.enhance.copy(sharpness = (it * 20).roundToInt() / 20f))
+                }
+                LabeledSlider("Contrast", "${(s.enhance.contrast * 100).roundToInt()}%", s.enhance.contrast, 0.8f..1.4f) {
+                    vm.setEnhance(s.enhance.copy(contrast = (it * 20).roundToInt() / 20f))
+                }
+                LabeledSlider("Colour", "${(s.enhance.colour * 100).roundToInt()}%", s.enhance.colour, 0.6f..1.6f) {
+                    vm.setEnhance(s.enhance.copy(colour = (it * 20).roundToInt() / 20f))
+                }
+                OutlinedButton(onClick = { vm.setEnhance(EnhanceSettings()) }) { Text("Reset to normal") }
+                Text("This only sharpens and adjusts colour. It does not add detail like AI upscaling.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        // ---------------- logo ----------------
+        item {
+            Section("Logo on the video") {
+                FileRow("Logo picture", s.watermark.name, { logoPicker.launch(arrayOf("image/*")) },
+                    if (s.watermark.uri != null) ({ vm.setWatermarkFile(null) }) else null)
+                if (s.watermark.uri != null) {
+                    Dropdown("Corner", s.watermark.corner.label, WatermarkCorner.entries, { it.label }) {
+                        vm.setWatermark(s.watermark.copy(corner = it))
+                    }
+                    LabeledSlider("Size", "${(s.watermark.sizePct * 100).roundToInt()}%", s.watermark.sizePct, 0.05f..0.4f) {
+                        vm.setWatermark(s.watermark.copy(sizePct = (it * 100).roundToInt() / 100f))
+                    }
+                    LabeledSlider("Opacity", "${(s.watermark.opacity * 100).roundToInt()}%", s.watermark.opacity, 0.2f..1f) {
+                        vm.setWatermark(s.watermark.copy(opacity = (it * 20).roundToInt() / 20f))
+                    }
+                }
+            }
+        }
+
+        }
+
+        if (tab == 3) {
         // ---------------- music ----------------
         item {
-            Section("4. Voice and background music") {
+            Section("Voice and background music") {
                 LabeledSlider("Voice volume", "${(s.audio.voiceVolume * 100).roundToInt()}%", s.audio.voiceVolume, 0f..3f) {
                     vm.setAudio(s.audio.copy(voiceVolume = it))
                 }
@@ -323,7 +413,7 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
 
         // ---------------- sfx ----------------
         item {
-            Section("5. Transition sounds") {
+            Section("Transition sounds") {
                 LabeledSwitch("Play a sound at each scene change", s.audio.sfxEnabled) { vm.setAudio(s.audio.copy(sfxEnabled = it)) }
                 if (s.audio.sfxEnabled) {
                     Dropdown("Sound", s.audio.sfxChoice.label, SfxChoice.entries.filter { it != SfxChoice.CUSTOM || s.audio.sfxCustomUri != null }, { it.label }) {
@@ -337,87 +427,9 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
             }
         }
 
-        // ---------------- subtitle style ----------------
-        item {
-            Section("6. Subtitle style") {
-                Dropdown("Style", s.caption.preset.label, CaptionPreset.entries, { it.label }) {
-                    vm.setCaption(s.caption.copy(preset = it))
-                }
-                LabeledSlider("Text size", "${(s.caption.sizeScale * 100).roundToInt()}%", s.caption.sizeScale, 0.6f..1.6f) {
-                    vm.setCaption(s.caption.copy(sizeScale = (it * 20).roundToInt() / 20f))
-                }
-                Dropdown("Position", s.caption.position.label, CaptionPosition.entries, { it.label }) {
-                    vm.setCaption(s.caption.copy(position = it))
-                }
-            }
         }
 
-        // ---------------- enhance ----------------
-        item {
-            Section("7. Sharpen and colour") {
-                LabeledSlider("Sharpness", "${(s.enhance.sharpness * 100).roundToInt()}%", s.enhance.sharpness, 0f..1f) {
-                    vm.setEnhance(s.enhance.copy(sharpness = (it * 20).roundToInt() / 20f))
-                }
-                LabeledSlider("Contrast", "${(s.enhance.contrast * 100).roundToInt()}%", s.enhance.contrast, 0.8f..1.4f) {
-                    vm.setEnhance(s.enhance.copy(contrast = (it * 20).roundToInt() / 20f))
-                }
-                LabeledSlider("Colour", "${(s.enhance.colour * 100).roundToInt()}%", s.enhance.colour, 0.6f..1.6f) {
-                    vm.setEnhance(s.enhance.copy(colour = (it * 20).roundToInt() / 20f))
-                }
-                OutlinedButton(onClick = { vm.setEnhance(EnhanceSettings()) }) { Text("Reset to normal") }
-                Text("This only sharpens and adjusts colour. It does not add detail like AI upscaling.", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-
-        // ---------------- logo ----------------
-        item {
-            Section("8. Logo on the video") {
-                FileRow("Logo picture", s.watermark.name, { logoPicker.launch(arrayOf("image/*")) },
-                    if (s.watermark.uri != null) ({ vm.setWatermarkFile(null) }) else null)
-                if (s.watermark.uri != null) {
-                    Dropdown("Corner", s.watermark.corner.label, WatermarkCorner.entries, { it.label }) {
-                        vm.setWatermark(s.watermark.copy(corner = it))
-                    }
-                    LabeledSlider("Size", "${(s.watermark.sizePct * 100).roundToInt()}%", s.watermark.sizePct, 0.05f..0.4f) {
-                        vm.setWatermark(s.watermark.copy(sizePct = (it * 100).roundToInt() / 100f))
-                    }
-                    LabeledSlider("Opacity", "${(s.watermark.opacity * 100).roundToInt()}%", s.watermark.opacity, 0.2f..1f) {
-                        vm.setWatermark(s.watermark.copy(opacity = (it * 20).roundToInt() / 20f))
-                    }
-                }
-            }
-        }
-
-        // ---------------- backup ----------------
-        item {
-            Section("9. Project backup") {
-                Text("Your project is already saved automatically. A backup file is an extra copy you can keep.", style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { backupSaver.launch("HU_project_backup.json") }, enabled = s.images.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Save backup") }
-                    OutlinedButton(onClick = { backupOpener.launch(arrayOf("*/*")) }, modifier = Modifier.weight(1f)) { Text("Restore backup") }
-                }
-                s.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            }
-        }
-
-        // ---------------- app colours ----------------
-        item {
-            Section("10. App colours") {
-                Text("Accent colour (buttons, sliders, highlights)", style = MaterialTheme.typography.bodySmall)
-                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    itemsIndexed(AppTheme.accents) { i, c ->
-                        ColourDot(c.color, AppTheme.accentIndex == i) { AppTheme.accentIndex = i; AppTheme.save(ctx) }
-                    }
-                }
-                Text("Background", style = MaterialTheme.typography.bodySmall)
-                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    itemsIndexed(AppTheme.backgrounds) { i, c ->
-                        ColourDot(c.color, AppTheme.backgroundIndex == i) { AppTheme.backgroundIndex = i; AppTheme.save(ctx) }
-                    }
-                }
-            }
-        }
-
+        if (tab == 4) {
         // ---------------- test render ----------------
         if (s.images.isNotEmpty() && !s.rendering) {
             item {
@@ -461,6 +473,18 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                     }
                     s.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
+            }
+        }
+        }
+
+        }
+        androidx.compose.material3.NavigationBar {
+            val tabs = listOf("🖼" to "Story", "🎞" to "Scenes", "🎨" to "Look", "🔊" to "Audio", "📤" to "Export")
+            tabs.forEachIndexed { i, (icon, label) ->
+                androidx.compose.material3.NavigationBarItem(
+                    selected = tab == i, onClick = { tab = i },
+                    icon = { Text(icon) }, label = { Text(label, maxLines = 1) }
+                )
             }
         }
     }
@@ -555,8 +579,7 @@ private fun AmbienceDialog(vm: MainViewModel, index: Int, onAll: (AmbienceSettin
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Plays under this picture. It is separate from the transition sound.", style = MaterialTheme.typography.bodySmall)
-                Dropdown("Sound", a.type.label,
-                    AmbienceType.entries.filter { it != AmbienceType.CUSTOM || a.customUri != null }, { it.label }) { a = a.copy(type = it) }
+                OptionGrid("Sound", AmbienceType.entries.filter { it != AmbienceType.CUSTOM || a.customUri != null }, a.type, { it.label }, 3) { a = a.copy(type = it) }
                 OutlinedButton(onClick = { picker.launch(arrayOf("audio/*")) }, modifier = Modifier.fillMaxWidth()) {
                     Text(a.customName?.let { "Own file: $it" } ?: "Choose my own sound file", maxLines = 1)
                 }
@@ -609,7 +632,7 @@ private fun EffectDialog(vm: MainViewModel, index: Int, onAll: (EffectSettings) 
                     factory = { EffectPreviewView(it, b, params) },
                     modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
                 )
-                Dropdown("Effect", e.type.label, EffectType.entries, { it.label }) { e = e.copy(type = it) }
+                OptionGrid("Effect", EffectType.entries, e.type, { it.label }, 3) { e = e.copy(type = it) }
                 if (e.type != EffectType.NONE) {
                     LabeledSlider("Strength", "${(e.intensity * 100).roundToInt()}%", e.intensity, 0f..1f) { e = e.copy(intensity = it) }
                     LabeledSlider("Speed", "%.1fx".format(e.speed), e.speed, 0.3f..3f) { e = e.copy(speed = (it * 10).roundToInt() / 10f) }
@@ -620,6 +643,9 @@ private fun EffectDialog(vm: MainViewModel, index: Int, onAll: (EffectSettings) 
                         LabeledSlider("Stays for", "%.1f s".format(sec), sec, 1f..10f) {
                             e = e.copy(onlyFirstSec = (it * 2).roundToInt() / 2f)
                         }
+                    }
+                    if (e.type == EffectType.BIRDS) {
+                        LabeledSlider("Bird size (zoom)", "${(e.scale * 100).roundToInt()}%", e.scale, 0.4f..3f) { e = e.copy(scale = (it * 20).roundToInt() / 20f) }
                     }
                     if (e.type != EffectType.SHAKE && e.type != EffectType.ZOOM_PULSE) {
                         Text("Size and place of the effect", style = MaterialTheme.typography.titleSmall)
@@ -744,80 +770,26 @@ private fun Thumb(uri: Uri, size: Dp = 64.dp) {
 // ---------------------------------------------------------------- scene editor
 
 @Composable
-private fun SceneStrip(s: UiState, selected: Int, onSelect: (Int) -> Unit) {
-    val state = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    var jump by remember { mutableStateOf("") }
-    Section("Scenes (scroll sideways, tap one to edit it)") {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = jump, onValueChange = { jump = it.filter(Char::isDigit).take(5) },
-                label = { Text("Go to scene") }, singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f)
-            )
-            Button(onClick = {
-                val n = (jump.toIntOrNull() ?: return@Button).coerceIn(1, s.images.size) - 1
-                onSelect(n)
-                scope.launch { state.animateScrollToItem(n) }
-            }) { Text("Go") }
-        }
-        LazyRow(state = state, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            itemsIndexed(s.images) { i, img ->
-                val sel = i == selected
-                Column(
-                    Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .border(if (sel) 3.dp else 1.dp, if (sel) MaterialTheme.colorScheme.primary else Color(0x55888888), RoundedCornerShape(8.dp))
-                        .clickable { onSelect(i) }
-                        .padding(4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Thumb(img.uri, 92.dp)
-                    val marks = (if (img.effect.type != EffectType.NONE) "✨" else "") +
-                        (if (img.ambience.type != AmbienceType.NONE) "🎧" else "") +
-                        (if (img.transition != null) "↔" else "") + (if (img.sfx != null) "♪" else "") +
-                        (if (img.pops.isNotEmpty()) "💬" else "")
-                    Text("${i + 1}${if (img.isVideo) " 🎬" else ""}", style = MaterialTheme.typography.labelMedium)
-                    Text(
-                        (s.sceneSecs.getOrNull(i)?.let { "%.1fs".format(it) } ?: "") + " " + marks,
-                        style = MaterialTheme.typography.labelSmall, maxLines = 1
-                    )
-                }
-            }
-        }
-        Text("✨ effect   🎧 scene sound   ↔ own transition   ♪ own sound   💬 pop", style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
-private fun SceneEditor(
-    vm: MainViewModel, s: UiState, index: Int,
-    onSelect: (Int) -> Unit, onEffect: (Int) -> Unit, onAmbience: (Int) -> Unit, onPreview: (Int) -> Unit,
-    onConfirm: (String, () -> Unit) -> Unit,
-    onAddPopText: (Int) -> Unit, onAddPopImage: (Int) -> Unit, onEditPop: (Int, PopItem) -> Unit
-) {
-    val img = s.images[index]
+private fun ScenePlayer(vm: MainViewModel, s: UiState, index: Int, onFollow: (Int) -> Unit) {
     val ctx = LocalContext.current
+    val pos by vm.playPos.collectAsState()
+    val starts = s.sceneStartsMs
+    val totalMs = (s.totalSecs * 1000f).toLong().coerceAtLeast(1L)
+    var scrubbed by remember { mutableStateOf(false) }
+    LaunchedEffect(pos) {
+        if ((s.playingAll || scrubbed) && starts.isNotEmpty()) {
+            val idx = starts.indexOfLast { it <= pos }.coerceAtLeast(0).coerceAtMost(s.images.lastIndex)
+            if (idx != index) onFollow(idx)
+        }
+    }
+    val img = s.images[index]
     val params = remember { EffectPreviewParams() }
     params.settings = img.effect
     val bmp by produceState<Bitmap?>(null, img.uri) {
         value = withContext(Dispatchers.IO) { try { BitmapLoader.decode(ctx, img.uri, 640) } catch (_: Exception) { null } }
     }
-    val replacePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { vm.replaceImage(index, it) }
-    Section("Edit scene ${index + 1} of ${s.images.size}") {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { onSelect((index - 1).coerceAtLeast(0)) }, enabled = index > 0) { Text("◀ Back") }
-            OutlinedButton(onClick = { onSelect((index + 1).coerceAtMost(s.images.lastIndex)) }, enabled = index < s.images.lastIndex) { Text("Next ▶") }
-            TextButton(onClick = { vm.playScene(index) }) { Text(if (s.playingScene == index) "■ Stop" else "▶ Voice") }
-        }
-        Text(
-            "${if (img.isVideo) "🎬 " else ""}${img.name}" + (s.sceneSecs.getOrNull(index)?.let { "  ·  %.1f s".format(it) } ?: ""),
-            style = MaterialTheme.typography.bodyMedium, maxLines = 1
-        )
-        OutlinedButton(onClick = { replacePicker.launch(arrayOf("image/*", "video/*")) }, modifier = Modifier.fillMaxWidth()) {
-            Text("Replace this scene's picture (keeps all its settings)")
-        }
+    fun mmss(ms: Long): String { val sec = (ms / 1000).toInt(); return "${sec / 60}:${"%02d".format(sec % 60)}" }
+    Section("Player") {
         val b = bmp
         if (b != null) {
             key(index, b) {
@@ -827,92 +799,281 @@ private fun SceneEditor(
                 )
             }
         } else Text("Loading preview…")
-        Text("The preview shows this scene's picture with its effect.", style = MaterialTheme.typography.bodySmall)
-
-        if (index == 0) {
-            Text("Opening scene (no transition or sound before it).", style = MaterialTheme.typography.bodySmall)
+        if (s.audio.voiceUri == null || starts.isEmpty()) {
+            Text("Add the voice-over and the SRT (Story tab) to listen to your whole voice-over here.", style = MaterialTheme.typography.bodySmall)
         } else {
-            if (s.transitions.enabled) {
-                val label = img.transition?.label ?: "Default (${s.transitions.default.label})"
-                Dropdown("Transition in", label, listOf<TransitionType?>(null) + TransitionType.entries, { it?.label ?: "Default" }) {
-                    vm.setImageTransition(index, it)
-                }
-                TextButton(onClick = { onPreview(index) }) { Text("Preview this transition") }
+            Slider(
+                value = pos.coerceIn(0L, totalMs).toFloat(),
+                onValueChange = { scrubbed = true; vm.seekAll(it.toLong()) },
+                valueRange = 0f..totalMs.toFloat()
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    scrubbed = true
+                    vm.seekAll(starts.getOrNull((index - 1).coerceAtLeast(0)) ?: 0L)
+                }) { Text("⏮") }
+                Button(onClick = {
+                    if (s.playingAll) vm.pauseAll()
+                    else { scrubbed = true; vm.playAll() }
+                }, modifier = Modifier.weight(1f)) { Text(if (s.playingAll) "⏸ Pause" else "▶ Play voice-over") }
+                OutlinedButton(onClick = {
+                    scrubbed = true
+                    vm.seekAll(starts.getOrNull((index + 1).coerceAtMost(s.images.lastIndex)) ?: 0L)
+                }) { Text("⏭") }
             }
-            if (s.audio.sfxEnabled) {
-                val opts = listOf<SfxChoice?>(null) + SfxChoice.entries.filter { it != SfxChoice.CUSTOM || s.audio.sfxCustomUri != null }
-                Dropdown("Transition sound", img.sfx?.label ?: "Default (${s.audio.sfxChoice.label})", opts, { it?.label ?: "Default" }) {
-                    vm.setImageSfx(index, it)
+            Text("Scene ${index + 1} of ${s.images.size}  ·  ${mmss(pos)} / ${mmss(totalMs)}", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun SceneGrid(s: UiState, selected: Int, onPick: (Int) -> Unit) {
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+    var tile by rememberSaveable { mutableStateOf(72f) }
+    var jump by remember { mutableStateOf("") }
+    Section("Scenes (pinch to zoom, tap one to edit it)") {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = jump, onValueChange = { jump = it.filter(Char::isDigit).take(5) },
+                label = { Text("Go to scene") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f)
+            )
+            Button(onClick = {
+                val n = (jump.toIntOrNull() ?: return@Button).coerceIn(1, s.images.size) - 1
+                onPick(n)
+                scope.launch { gridState.animateScrollToItem(n) }
+            }) { Text("Go") }
+        }
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(tile.dp),
+            state = gridState,
+            modifier = Modifier.fillMaxWidth().height(300.dp).pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    do {
+                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                        if (ev.changes.size >= 2) {
+                            val z = ev.calculateZoom()
+                            if (z != 1f) {
+                                tile = (tile * z).coerceIn(48f, 160f)
+                                ev.changes.forEach { it.consume() }
+                            }
+                        }
+                    } while (ev.changes.any { it.pressed })
+                }
+            },
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(s.images.size) { i ->
+                val img = s.images[i]
+                val sel = i == selected
+                Box(
+                    Modifier
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(if (sel) 3.dp else 1.dp, if (sel) MaterialTheme.colorScheme.primary else Color(0x55888888), RoundedCornerShape(8.dp))
+                        .clickable { onPick(i) }
+                ) {
+                    Thumb(img.uri, 160.dp)
+                    val marks = (if (img.effect.type != EffectType.NONE) "✨" else "") +
+                        (if (img.ambience.type != AmbienceType.NONE) "🎧" else "") +
+                        (if (img.pops.isNotEmpty()) "💬" else "")
+                    Text(
+                        "${i + 1}${if (img.isVideo) "🎬" else ""}" + (if (tile >= 64f) marks else ""),
+                        Modifier.align(Alignment.BottomStart).background(Color(0xAA000000)).padding(horizontal = 4.dp),
+                        color = Color.White, style = MaterialTheme.typography.labelSmall, maxLines = 1
+                    )
                 }
             }
         }
-        OutlinedButton(onClick = { onEffect(index) }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (img.effect.type == EffectType.NONE) "Add effect" else "Effect: ${img.effect.type.label}", maxLines = 1)
+        Text("✨ effect   🎧 scene sound   💬 pop   🎬 clip", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** A square-tile picker: several choices per row, the chosen one is outlined. */
+@Composable
+private fun <T> OptionGrid(label: String, options: List<T>, selected: T, labelOf: (T) -> String, columns: Int = 3, onSelect: (T) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.bodySmall)
+        options.chunked(columns).forEach { rowItems ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                rowItems.forEach { o ->
+                    val sel = o == selected
+                    Box(
+                        Modifier.weight(1f).height(56.dp).clip(RoundedCornerShape(10.dp))
+                            .border(if (sel) 3.dp else 1.dp, if (sel) MaterialTheme.colorScheme.primary else Color(0x55888888), RoundedCornerShape(10.dp))
+                            .clickable { onSelect(o) }.padding(4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(labelOf(o), style = MaterialTheme.typography.labelSmall, maxLines = 3, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                }
+                repeat(columns - rowItems.size) { Spacer(Modifier.weight(1f)) }
+            }
         }
-        OutlinedButton(onClick = { onAmbience(index) }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (img.ambience.type == AmbienceType.NONE) "Add scene sound" else "Scene sound: ${img.ambience.type.label}", maxLines = 1)
+    }
+}
+
+@Composable
+private fun SettingsPage(s: UiState, onBack: () -> Unit, onSaveBackup: () -> Unit, onRestoreBackup: () -> Unit, onNewProject: () -> Unit) {
+    val ctx = LocalContext.current
+    val ver = remember {
+        try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "" } catch (e: Exception) { "" }
+    }
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("◀ Back") }
+            Text("Settings", style = MaterialTheme.typography.titleMedium)
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Section("App colours") {
+                OptionGrid("Accent colour (buttons, sliders, highlights)", AppTheme.accents.indices.toList(), AppTheme.accentIndex,
+                    { AppTheme.accents[it].name }, 3) { AppTheme.accentIndex = it; AppTheme.save(ctx) }
+                OptionGrid("Background", AppTheme.backgrounds.indices.toList(), AppTheme.backgroundIndex,
+                    { AppTheme.backgrounds[it].name }, 3) { AppTheme.backgroundIndex = it; AppTheme.save(ctx) }
+            }
+            Section("Project") {
+                Text("Your project is already saved automatically. A backup file is an extra copy you can keep.", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onSaveBackup, enabled = s.images.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Save backup") }
+                    OutlinedButton(onClick = onRestoreBackup, modifier = Modifier.weight(1f)) { Text("Restore backup") }
+                }
+                s.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                OutlinedButton(onClick = onNewProject, enabled = s.images.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("Start a new project") }
+            }
+            Section("About") { Text("HU Video Maker v$ver") }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- scene editor
+
+@Composable
+private fun SceneEditor(
+    vm: MainViewModel, s: UiState, index: Int,
+    onSelect: (Int) -> Unit, onEffect: (Int) -> Unit, onAmbience: (Int) -> Unit, onPreview: (Int) -> Unit,
+    onConfirm: (String, () -> Unit) -> Unit,
+    onAddPopText: (Int) -> Unit, onAddPopImage: (Int) -> Unit, onEditPop: (Int, PopItem) -> Unit
+) {
+    val img = s.images[index]
+    val replacePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { vm.replaceImage(index, it) }
+    var part by rememberSaveable { mutableStateOf(0) }
+    Section("Edit scene ${index + 1} of ${s.images.size}") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { onSelect((index - 1).coerceAtLeast(0)) }, enabled = index > 0) { Text("◀ Back") }
+            OutlinedButton(onClick = { onSelect((index + 1).coerceAtMost(s.images.lastIndex)) }, enabled = index < s.images.lastIndex) { Text("Next ▶") }
+        }
+        Text(
+            "${if (img.isVideo) "🎬 " else ""}${img.name}" + (s.sceneSecs.getOrNull(index)?.let { "  ·  %.1f s".format(it) } ?: ""),
+            style = MaterialTheme.typography.bodyMedium, maxLines = 1
+        )
+        OutlinedButton(onClick = { replacePicker.launch(arrayOf("image/*", "video/*")) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Replace this scene's picture (keeps all its settings)")
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("Effect", "Transition", "Sound", "Pops", "Copy").forEachIndexed { i, name ->
+                androidx.compose.material3.FilterChip(selected = part == i, onClick = { part = i }, label = { Text(name) })
+            }
         }
 
-        // ---- pop text and pop pictures ----
-        Text("Pop text and pictures on this scene", style = MaterialTheme.typography.titleSmall)
-        img.pops.forEach { pop ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    (if (pop.kind == PopKind.TEXT) "💬 ${pop.text.take(22)}" else "🖼 ${pop.imageName ?: "picture"}") +
-                        "  @ ${String.format(Locale.US, "%.1f", pop.startSec)} s",
-                    modifier = Modifier.weight(1f), maxLines = 1, style = MaterialTheme.typography.bodyMedium
+        if (part == 0) {
+            OutlinedButton(onClick = { onEffect(index) }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (img.effect.type == EffectType.NONE) "Add effect" else "Effect: ${img.effect.type.label}", maxLines = 1)
+            }
+            Text("The player above shows the picture with its effect.", style = MaterialTheme.typography.bodySmall)
+        }
+
+        if (part == 1) {
+            if (index == 0) {
+                Text("Opening scene (no transition or sound before it).", style = MaterialTheme.typography.bodySmall)
+            } else {
+                if (s.transitions.enabled) {
+                    val label = img.transition?.label ?: "Default (${s.transitions.default.label})"
+                    Dropdown("Transition in", label, listOf<TransitionType?>(null) + TransitionType.entries, { it?.label ?: "Default" }) {
+                        vm.setImageTransition(index, it)
+                    }
+                    TextButton(onClick = { onPreview(index) }) { Text("Preview this transition") }
+                } else Text("Transitions are off (Look tab).", style = MaterialTheme.typography.bodySmall)
+                if (s.audio.sfxEnabled) {
+                    val opts = listOf<SfxChoice?>(null) + SfxChoice.entries.filter { it != SfxChoice.CUSTOM || s.audio.sfxCustomUri != null }
+                    Dropdown("Transition sound", img.sfx?.label ?: "Default (${s.audio.sfxChoice.label})", opts, { it?.label ?: "Default" }) {
+                        vm.setImageSfx(index, it)
+                    }
+                }
+            }
+        }
+
+        if (part == 2) {
+            OutlinedButton(onClick = { onAmbience(index) }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (img.ambience.type == AmbienceType.NONE) "Add scene sound" else "Scene sound: ${img.ambience.type.label}", maxLines = 1)
+            }
+        }
+
+        if (part == 3) {
+            Text("Pop text and pictures on this scene", style = MaterialTheme.typography.titleSmall)
+            img.pops.forEach { pop ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        (if (pop.kind == PopKind.TEXT) "💬 ${pop.text.take(22)}" else "🖼 ${pop.imageName ?: "picture"}") +
+                            "  @ ${String.format(Locale.US, "%.1f", pop.startSec)} s",
+                        modifier = Modifier.weight(1f), maxLines = 1, style = MaterialTheme.typography.bodyMedium
+                    )
+                    TextButton(onClick = { onEditPop(index, pop) }) { Text("Edit") }
+                    TextButton(onClick = { onConfirm("Delete this pop from scene ${index + 1}? (you can Undo)") { vm.deletePop(index, pop.id) } }) { Text("Delete") }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onAddPopText(index) }, modifier = Modifier.weight(1f)) { Text("+ Pop text") }
+                OutlinedButton(onClick = { onAddPopImage(index) }, modifier = Modifier.weight(1f)) { Text("+ Pop picture") }
+            }
+        }
+
+        if (part == 4) {
+            var from by remember(index) { mutableStateOf((index + 2).coerceAtMost(s.images.size).toString()) }
+            var to by remember(index) { mutableStateOf((index + 2).coerceAtMost(s.images.size).toString()) }
+            var cT by remember { mutableStateOf(true) }
+            var cS by remember { mutableStateOf(true) }
+            var cE by remember { mutableStateOf(true) }
+            var cA by remember { mutableStateOf(true) }
+            var cP by remember { mutableStateOf(true) }
+            Text("Copy this scene's settings to other scenes", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = from, onValueChange = { from = it.filter(Char::isDigit).take(5) }, label = { Text("From scene") },
+                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f)
                 )
-                TextButton(onClick = { onEditPop(index, pop) }) { Text("Edit") }
-                TextButton(onClick = { onConfirm("Delete this pop from scene ${index + 1}? (you can Undo)") { vm.deletePop(index, pop.id) } }) { Text("Delete") }
+                OutlinedTextField(
+                    value = to, onValueChange = { to = it.filter(Char::isDigit).take(5) }, label = { Text("To scene") },
+                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f)
+                )
             }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { onAddPopText(index) }, modifier = Modifier.weight(1f)) { Text("+ Pop text") }
-            OutlinedButton(onClick = { onAddPopImage(index) }, modifier = Modifier.weight(1f)) { Text("+ Pop picture") }
-        }
-
-        // ---- copy this scene's settings to other scenes ----
-        var from by remember(index) { mutableStateOf((index + 2).coerceAtMost(s.images.size).toString()) }
-        var to by remember(index) { mutableStateOf((index + 2).coerceAtMost(s.images.size).toString()) }
-        var cT by remember { mutableStateOf(true) }
-        var cS by remember { mutableStateOf(true) }
-        var cE by remember { mutableStateOf(true) }
-        var cA by remember { mutableStateOf(true) }
-        var cP by remember { mutableStateOf(true) }
-        Text("Copy this scene's settings to other scenes", style = MaterialTheme.typography.titleSmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = from, onValueChange = { from = it.filter(Char::isDigit).take(5) }, label = { Text("From scene") },
-                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = to, onValueChange = { to = it.filter(Char::isDigit).take(5) }, label = { Text("To scene") },
-                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f)
-            )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cT, { cT = it }); Text("Transition") }
-        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cS, { cS = it }); Text("Transition sound") }
-        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cE, { cE = it }); Text("Effect") }
-        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cA, { cA = it }); Text("Scene sound") }
-        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cP, { cP = it }); Text("Pop text and pictures") }
-        Button(onClick = {
-            val a = ((from.toIntOrNull() ?: 1).coerceIn(1, s.images.size)) - 1
-            val z = ((to.toIntOrNull() ?: a + 1).coerceIn(1, s.images.size)) - 1
-            val first = minOf(a, z)
-            val last = maxOf(a, z)
-            val parts = buildSet {
-                if (cT) add(MainViewModel.CopyPart.TRANSITION)
-                if (cS) add(MainViewModel.CopyPart.SOUND)
-                if (cE) add(MainViewModel.CopyPart.EFFECT)
-                if (cA) add(MainViewModel.CopyPart.SCENE_SOUND)
-                if (cP) add(MainViewModel.CopyPart.POPS)
-            }
-            if (parts.isNotEmpty()) {
-                onConfirm("Copy the chosen settings of scene ${index + 1} onto scenes ${first + 1} to ${last + 1}? This replaces what those scenes have now (you can Undo).") {
-                    vm.copySceneSettings(index, first, last, parts)
+            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cT, { cT = it }); Text("Transition") }
+            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cS, { cS = it }); Text("Transition sound") }
+            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cE, { cE = it }); Text("Effect") }
+            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cA, { cA = it }); Text("Scene sound") }
+            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(cP, { cP = it }); Text("Pop text and pictures") }
+            Button(onClick = {
+                val a = ((from.toIntOrNull() ?: 1).coerceIn(1, s.images.size)) - 1
+                val z = ((to.toIntOrNull() ?: a + 1).coerceIn(1, s.images.size)) - 1
+                val first = minOf(a, z)
+                val last = maxOf(a, z)
+                val parts = buildSet {
+                    if (cT) add(MainViewModel.CopyPart.TRANSITION)
+                    if (cS) add(MainViewModel.CopyPart.SOUND)
+                    if (cE) add(MainViewModel.CopyPart.EFFECT)
+                    if (cA) add(MainViewModel.CopyPart.SCENE_SOUND)
+                    if (cP) add(MainViewModel.CopyPart.POPS)
                 }
-            }
-        }, modifier = Modifier.fillMaxWidth()) { Text("Copy to these scenes") }
+                if (parts.isNotEmpty()) {
+                    onConfirm("Copy the chosen settings of scene ${index + 1} onto scenes ${first + 1} to ${last + 1}? This replaces what those scenes have now (you can Undo).") {
+                        vm.copySceneSettings(index, first, last, parts)
+                    }
+                }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Copy to these scenes") }
+        }
     }
 }
 

@@ -110,7 +110,9 @@ data class EffectSettings(
     val regionX: Float = 0.5f,
     val regionY: Float = 0.5f,
     val regionW: Float = 1f,
-    val regionH: Float = 1f
+    val regionH: Float = 1f,
+    /** Size of the effect's own elements (used by the birds: flock size). 1 = normal. */
+    val scale: Float = 1f
 )
 
 /** Sound that plays under one scene (not a transition sound). */

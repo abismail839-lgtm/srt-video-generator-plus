@@ -285,7 +285,7 @@ class NativeMediaGenerator(private val context: Context) {
         val e = effectOf(req, scene) ?: return
         if (e.type == EffectType.SHAKE || e.type == EffectType.ZOOM_PULSE) return
         val local = (t - tl.scenes[scene].startUs) / 1_000_000f * e.speed + 50f
-        r.drawOverlay(e.type.ordinal, e.intensity, local, effectAlpha(e, tl, scene, t) * mix, e.regionX, e.regionY, e.regionW, e.regionH)
+        r.drawOverlay(e.type.ordinal, e.intensity, local, effectAlpha(e, tl, scene, t) * mix, e.regionX, e.regionY, e.regionW, e.regionH, e.scale)
     }
 
     private fun zoomScale(req: RenderRequest, tl: Timeline, scene: Int, t: Long): Float {

@@ -70,3 +70,9 @@ Test render: loudness scan of the voice-over only covers the rendered part (was 
 
 ## 5.7
 Flying birds effect; every overlay effect can be sized and placed; replace the picture of a scene.
+
+## 5.7.1
+Birds fly as one compact flock; Bird size (zoom) slider.
+
+## 5.8
+New layout: top bar (undo, settings, Export), bottom tabs (Story, Scenes, Look, Audio, Export), settings page (colours, backup), whole voice-over player, compact scene grid with pinch zoom, scene editor split in parts, square option grids, compact bird flock.

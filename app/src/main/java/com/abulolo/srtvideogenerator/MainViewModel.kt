@@ -39,6 +39,9 @@ data class UiState(
     val enhance: EnhanceSettings = EnhanceSettings(),
     /** Index of the image whose voice-over part is playing, or null. */
     val playingScene: Int? = null,
+    /** Whole voice-over player: playing now, and where each scene starts (ms). */
+    val playingAll: Boolean = false,
+    val sceneStartsMs: List<Long> = emptyList(),
     /** Length of each scene in seconds (needs the SRT), and the whole video. */
     val sceneSecs: List<Float> = emptyList(),
     val totalSecs: Float = 0f,
@@ -260,7 +263,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val voiceUs = s.audio.voiceUri?.let { NativeMediaGenerator(ctx).mediaDurationUs(it) } ?: 0L
                 val tl = TimelinePlanner.plan(s.images.size, cues, emptyList(), TransitionSettings(enabled = false), voiceUs, 3000)
                 val secs = tl.scenes.map { it.durationUs / 1_000_000f }
-                _state.update { it.copy(sceneSecs = secs, totalSecs = tl.totalUs / 1_000_000f) }
+                _state.update { it.copy(sceneSecs = secs, totalSecs = tl.totalUs / 1_000_000f, sceneStartsMs = tl.scenes.map { sc -> sc.startUs / 1000 }) }
             } catch (_: Exception) {}
         }
     }
@@ -300,7 +303,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         save()
     }
 
-    fun setVoice(uri: Uri?) { uri?.let(::persist); _state.update { it.copy(audio = it.audio.copy(voiceUri = uri), voiceName = uri?.let { u -> displayName(ctx, u) }) }; refreshDurations() }
+    fun setVoice(uri: Uri?) { releaseFull(); uri?.let(::persist); _state.update { it.copy(audio = it.audio.copy(voiceUri = uri), voiceName = uri?.let { u -> displayName(ctx, u) }) }; refreshDurations() }
     fun setMusic(uri: Uri?) { uri?.let(::persist); _state.update { it.copy(audio = it.audio.copy(musicUri = uri), musicName = uri?.let { u -> displayName(ctx, u) }) } }
 
     fun setSfxFile(uri: Uri?) {
@@ -444,7 +447,74 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------------- whole voice-over player ----------------
+
+    private val _pos = MutableStateFlow(0L)
+    val playPos: StateFlow<Long> = _pos
+    private var fullPlayer: MediaPlayer? = null
+    private val ticker = object : Runnable {
+        override fun run() {
+            val p = fullPlayer ?: return
+            try { _pos.value = p.currentPosition.toLong() } catch (_: Exception) {}
+            if (_state.value.playingAll) handler.postDelayed(this, 120)
+        }
+    }
+
+    private fun releaseFull() {
+        handler.removeCallbacks(ticker)
+        try { fullPlayer?.release() } catch (_: Exception) {}
+        fullPlayer = null
+        _pos.value = 0L
+        _state.update { it.copy(playingAll = false) }
+    }
+
+    /** Plays the whole voice-over from [fromMs] (or from where it was paused). */
+    fun playAll(fromMs: Long? = null) {
+        stopScene()
+        val voice = _state.value.audio.voiceUri
+        if (voice == null) {
+            _state.update { it.copy(error = "Add the voice-over first, then you can listen to it.") }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                var mp = fullPlayer
+                if (mp == null) {
+                    mp = MediaPlayer()
+                    mp.setDataSource(ctx, voice)
+                    mp.prepare()
+                    mp.seekTo((fromMs ?: _pos.value).toInt())
+                    mp.setOnCompletionListener { handler.post { pauseAll(); _pos.value = 0L; try { fullPlayer?.seekTo(0) } catch (_: Exception) {} } }
+                } else if (fromMs != null) {
+                    mp.seekTo(fromMs.toInt())
+                }
+                mp.start()
+                val ready = mp
+                handler.post {
+                    fullPlayer = ready
+                    _state.update { it.copy(playingAll = true, error = null) }
+                    handler.removeCallbacks(ticker)
+                    handler.post(ticker)
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = "Could not play the voice-over: ${e.message}") }
+            }
+        }
+    }
+
+    fun pauseAll() {
+        handler.removeCallbacks(ticker)
+        try { fullPlayer?.pause() } catch (_: Exception) {}
+        _state.update { it.copy(playingAll = false) }
+    }
+
+    fun seekAll(ms: Long) {
+        _pos.value = ms.coerceAtLeast(0L)
+        try { fullPlayer?.seekTo(ms.toInt().coerceAtLeast(0)) } catch (_: Exception) {}
+    }
+
     override fun onCleared() {
+        try { fullPlayer?.release() } catch (_: Exception) {}
         try { player?.release() } catch (_: Exception) {}
         super.onCleared()
     }
