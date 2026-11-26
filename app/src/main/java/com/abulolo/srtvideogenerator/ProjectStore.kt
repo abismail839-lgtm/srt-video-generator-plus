@@ -113,7 +113,7 @@ class ProjectStore(context: Context) {
                         .put("r", p.rotation.toDouble()).put("c", p.color).put("snd", p.sound.name)
                         .put("sv", p.soundVolume.toDouble())
                         .put("mv", p.move.name).put("md", p.moveDist.toDouble()).put("ms", p.moveSmooth)
-                        .put("mb", p.moveBack).put("mg", p.moveGrow.toDouble()).apply {
+                        .put("mb", p.moveBack).put("mg", p.moveGrow.toDouble()).put("ash", p.arrowShape.name).apply {
                             p.imageUri?.let { put("iu", it.toString()) }
                             p.imageName?.let { put("in", it) }
                             p.soundUri?.let { put("su", it.toString()) }
@@ -149,7 +149,8 @@ class ProjectStore(context: Context) {
                     soundUri = p.getUri("su"),
                     move = p.getEnum("mv", PopMove.NONE), moveDist = p.optDouble("md", 0.3).toFloat(),
                     moveSmooth = p.optBoolean("ms", true), moveBack = p.optBoolean("mb", false),
-                    moveGrow = p.optDouble("mg", 1.0).toFloat()
+                    moveGrow = p.optDouble("mg", 1.0).toFloat(),
+                    arrowShape = p.getEnum("ash", ArrowShape.STRAIGHT)
                 )
             }
             list += ImageItem(

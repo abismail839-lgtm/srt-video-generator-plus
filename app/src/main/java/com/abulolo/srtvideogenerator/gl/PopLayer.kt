@@ -5,12 +5,14 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import com.abulolo.srtvideogenerator.BitmapLoader
+import com.abulolo.srtvideogenerator.ArrowShape
 import com.abulolo.srtvideogenerator.PopAnim
 import com.abulolo.srtvideogenerator.PopItem
 import com.abulolo.srtvideogenerator.PopMove
@@ -88,6 +90,11 @@ class PopLayer(private val context: Context, private val r: SurfaceRenderer, pri
             tex = texture(key) { textBitmap(item, shown) }
             wPx = (tex?.width ?: 0) * scale
             hPx = (tex?.height ?: 0) * scale
+        } else if (item.kind == PopKind.ARROW) {
+            val key = "A${item.id}|${item.arrowShape}|${item.color}|${item.size}"
+            tex = texture(key) { arrowBitmap(item) }
+            wPx = (tex?.width ?: 0) * scale
+            hPx = (tex?.height ?: 0) * scale
         } else {
             val uri = item.imageUri ?: return
             tex = texture("I$uri") {
@@ -124,6 +131,84 @@ class PopLayer(private val context: Context, private val r: SurfaceRenderer, pri
         val c1 = 1.70158f
         val c3 = c1 + 1f
         return 1f + c3 * (t - 1f).pow(3) + c1 * (t - 1f).pow(2)
+    }
+
+    // ---------------------------------------------------------------- arrows
+
+    /** An arrow that points to the right; the pop's rotation turns it. Dark outline so it shows on any picture. */
+    private fun arrowBitmap(item: PopItem): Bitmap {
+        val len = (min(w, h) * 0.26f * item.size).coerceAtLeast(24f)
+        val bw = len.toInt()
+        val bh = (len * 0.7f).toInt()
+        val bmp = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val col = if (item.color != 0) item.color else Color.rgb(212, 32, 32)
+        val pad = len * 0.07f
+        val cy = bh / 2f
+        val thick = when (item.arrowShape) {
+            ArrowShape.BLOCK -> len * 0.26f
+            ArrowShape.HAND -> len * 0.07f
+            else -> len * 0.12f
+        }
+        val outline = max(3f, len * 0.035f)
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = col; this.style = Paint.Style.FILL }
+        val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK; this.style = Paint.Style.STROKE; strokeWidth = outline * 2f
+            strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+        }
+        fun both(path: Path) { c.drawPath(path, edge); c.drawPath(path, fill) }
+
+        when (item.arrowShape) {
+            ArrowShape.STRAIGHT, ArrowShape.BLOCK -> {
+                val headLen = if (item.arrowShape == ArrowShape.BLOCK) len * 0.34f else len * 0.28f
+                val hh = if (item.arrowShape == ArrowShape.BLOCK) bh * 0.46f else bh * 0.36f
+                val xh = len - pad - headLen
+                val path = Path().apply {
+                    moveTo(pad, cy - thick / 2f); lineTo(xh, cy - thick / 2f); lineTo(xh, cy - hh)
+                    lineTo(len - pad, cy); lineTo(xh, cy + hh); lineTo(xh, cy + thick / 2f)
+                    lineTo(pad, cy + thick / 2f); close()
+                }
+                both(path)
+            }
+            ArrowShape.CURVED -> {
+                val p0x = pad + thick; val p0y = bh * 0.9f
+                val p1x = len * 0.40f; val p1y = bh * 0.02f
+                val p2x = len - pad - len * 0.20f; val p2y = bh * 0.42f
+                val shaft = Path().apply { moveTo(p0x, p0y); quadTo(p1x, p1y, p2x, p2y) }
+                val shaftEdge = Paint(edge).apply { strokeWidth = thick + outline * 2f }
+                val shaftFill = Paint(fill).apply { this.style = Paint.Style.STROKE; strokeWidth = thick; strokeCap = Paint.Cap.ROUND }
+                c.drawPath(shaft, shaftEdge); c.drawPath(shaft, shaftFill)
+                val ang = kotlin.math.atan2(p2y - p1y, p2x - p1x)
+                val ux = kotlin.math.cos(ang); val uy = kotlin.math.sin(ang)
+                val headLen = len * 0.26f; val hh = bh * 0.30f
+                val tipX = p2x + ux * headLen; val tipY = p2y + uy * headLen
+                val head = Path().apply {
+                    moveTo(tipX, tipY)
+                    lineTo(p2x - uy * hh, p2y + ux * hh)
+                    lineTo(p2x + uy * hh, p2y - ux * hh)
+                    close()
+                }
+                both(head)
+            }
+            ArrowShape.HAND -> {
+                val stroke = Paint(fill).apply {
+                    this.style = Paint.Style.STROKE; strokeWidth = thick; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+                }
+                val strokeEdge = Paint(edge).apply { strokeWidth = thick + outline * 2f }
+                val tipX = len - pad; val tipY = cy
+                val shaft = Path().apply {
+                    moveTo(pad, cy + bh * 0.04f)
+                    quadTo(len * 0.25f, cy - bh * 0.10f, len * 0.50f, cy + bh * 0.05f)
+                    quadTo(len * 0.75f, cy - bh * 0.06f, tipX, tipY)
+                }
+                val v = Path().apply {
+                    moveTo(tipX - len * 0.24f, tipY - bh * 0.30f); lineTo(tipX, tipY); lineTo(tipX - len * 0.25f, tipY + bh * 0.28f)
+                }
+                c.drawPath(shaft, strokeEdge); c.drawPath(v, strokeEdge)
+                c.drawPath(shaft, stroke); c.drawPath(v, stroke)
+            }
+        }
+        return bmp
     }
 
     // ---------------------------------------------------------------- text pictures

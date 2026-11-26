@@ -104,6 +104,7 @@ import com.abulolo.srtvideogenerator.PopAnim
 import com.abulolo.srtvideogenerator.PopItem
 import com.abulolo.srtvideogenerator.PopMove
 import com.abulolo.srtvideogenerator.PopKind
+import com.abulolo.srtvideogenerator.ArrowShape
 import com.abulolo.srtvideogenerator.PopStyle
 import java.util.Locale
 import com.abulolo.srtvideogenerator.Resolution
@@ -219,6 +220,7 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
                             popEdit = idx to PopItem(id = System.nanoTime(), kind = PopKind.TEXT, text = "Your text", size = 1f)
                         },
                         onAddPopImage = { idx -> pickForScene = idx; popImagePicker.launch(arrayOf("image/*")) },
+                        onAddPopArrow = { idx -> popEdit = idx to PopItem(id = System.nanoTime(), kind = PopKind.ARROW, size = 1f) },
                         onEditPop = { idx, pop -> popEdit = idx to pop }
                     )
                 }
@@ -954,11 +956,14 @@ private fun SceneStrip(s: UiState, selected: Int, onPick: (Int) -> Unit) {
                     val marks = (if (img.allEffects().isNotEmpty()) "✨" else "") +
                         (if (img.ambience.type != AmbienceType.NONE) "🎧" else "") +
                         (if (img.pops.isNotEmpty()) "💬" else "")
-                    Text(
-                        "${i + 1}${if (img.isVideo) "🎬" else ""}" + (if (tile >= 70f) marks else ""),
-                        Modifier.align(Alignment.BottomStart).background(Color(0xAA000000)).padding(horizontal = 4.dp),
-                        color = Color.White, style = MaterialTheme.typography.labelSmall, maxLines = 1
-                    )
+                    val secs = s.sceneSecs.getOrNull(i)?.let { String.format(Locale.US, "%.1fs", it) } ?: ""
+                    Column(Modifier.align(Alignment.BottomStart).background(Color(0xAA000000)).padding(horizontal = 4.dp)) {
+                        Text(
+                            "${i + 1}${if (img.isVideo) "🎬" else ""}" + (if (tile >= 70f) marks else ""),
+                            color = Color.White, style = MaterialTheme.typography.labelSmall, maxLines = 1
+                        )
+                        if (secs.isNotEmpty()) Text(secs, color = Color(0xFFFFE082), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
                 }
             }
         }
@@ -1029,7 +1034,7 @@ private fun SceneEditor(
     vm: MainViewModel, s: UiState, index: Int,
     onSelect: (Int) -> Unit, onEffect: (Int, Int) -> Unit, onAmbience: (Int) -> Unit, onPreview: (Int) -> Unit,
     onConfirm: (String, () -> Unit) -> Unit,
-    onAddPopText: (Int) -> Unit, onAddPopImage: (Int) -> Unit, onEditPop: (Int, PopItem) -> Unit
+    onAddPopText: (Int) -> Unit, onAddPopImage: (Int) -> Unit, onAddPopArrow: (Int) -> Unit, onEditPop: (Int, PopItem) -> Unit
 ) {
     val img = s.images[index]
     val replacePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { vm.replaceImage(index, it) }
@@ -1102,7 +1107,7 @@ private fun SceneEditor(
             img.pops.forEach { pop ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        (if (pop.kind == PopKind.TEXT) "💬 ${pop.text.take(22)}" else "🖼 ${pop.imageName ?: "picture"}") +
+                        (when (pop.kind) { PopKind.TEXT -> "💬 ${pop.text.take(22)}"; PopKind.ARROW -> "➜ ${pop.arrowShape.label}"; else -> "🖼 ${pop.imageName ?: "picture"}" }) +
                             "  @ ${String.format(Locale.US, "%.1f", pop.startSec)} s",
                         modifier = Modifier.weight(1f), maxLines = 1, style = MaterialTheme.typography.bodyMedium
                     )
@@ -1114,6 +1119,7 @@ private fun SceneEditor(
                 OutlinedButton(onClick = { onAddPopText(index) }, modifier = Modifier.weight(1f)) { Text("+ Pop text") }
                 OutlinedButton(onClick = { onAddPopImage(index) }, modifier = Modifier.weight(1f)) { Text("+ Pop picture") }
             }
+            OutlinedButton(onClick = { onAddPopArrow(index) }, modifier = Modifier.fillMaxWidth()) { Text("+ Pop arrow ➜") }
         }
 
         if (part == 4) {
@@ -1201,7 +1207,7 @@ private fun PopDialog(vm: MainViewModel, scene: Int, initial: PopItem, onClose: 
 
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text(if (p.kind == PopKind.TEXT) "Pop text (scene ${scene + 1})" else "Pop picture (scene ${scene + 1})") },
+        title = { Text(when (p.kind) { PopKind.TEXT -> "Pop text (scene ${scene + 1})"; PopKind.ARROW -> "Pop arrow (scene ${scene + 1})"; else -> "Pop picture (scene ${scene + 1})" }) },
         confirmButton = { TextButton(onClick = { vm.upsertPop(scene, p); onClose() }) { Text("Done") } },
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
         text = {
@@ -1224,6 +1230,18 @@ private fun PopDialog(vm: MainViewModel, scene: Int, initial: PopItem, onClose: 
                         p = p.copy(color = it.second)
                     }
                     LabeledSlider("Text size", "${(p.size * 100).roundToInt()}%", p.size, 0.3f..3f) { p = p.copy(size = (it * 20).roundToInt() / 20f) }
+                } else if (p.kind == PopKind.ARROW) {
+                    Dropdown("Arrow look", p.arrowShape.label, ArrowShape.entries, { it.label }) { p = p.copy(arrowShape = it) }
+                    Dropdown("Colour", POP_COLOURS.firstOrNull { it.second == p.color }?.first ?: "Custom",
+                        POP_COLOURS.map { if (it.second == 0) "Red (default)" to 0 else it }, { it.first }) {
+                        p = p.copy(color = it.second)
+                    }
+                    LabeledSlider("Arrow size", "${(p.size * 100).roundToInt()}%", p.size, 0.3f..3f) { p = p.copy(size = (it * 20).roundToInt() / 20f) }
+                    OptionGrid(
+                        "Points to", listOf(0f, 45f, 90f, 135f, 180f, -135f, -90f, -45f), p.rotation,
+                        { when (it) { 0f -> "→ right"; 45f -> "↗ up-right"; 90f -> "↑ up"; 135f -> "↖ up-left"; 180f -> "← left"; -135f -> "↙ down-left"; -90f -> "↓ down"; else -> "↘ down-right" } },
+                        4
+                    ) { p = p.copy(rotation = it) }
                 } else {
                     Text("Picture: ${p.imageName ?: "none"}", maxLines = 1)
                     OutlinedButton(onClick = { imgPicker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth()) { Text("Change picture") }
@@ -1259,7 +1277,11 @@ private fun PopDialog(vm: MainViewModel, scene: Int, initial: PopItem, onClose: 
                 }
                 LabeledSlider("Left to right", "${(p.x * 100).roundToInt()}%", p.x, 0f..1f) { p = p.copy(x = (it * 100).roundToInt() / 100f) }
                 LabeledSlider("Up to down", "${(p.y * 100).roundToInt()}%", p.y, 0f..1f) { p = p.copy(y = (it * 100).roundToInt() / 100f) }
-                LabeledSlider("Tilt", "${p.rotation.roundToInt()}°", p.rotation, -45f..45f) { p = p.copy(rotation = it.roundToInt().toFloat()) }
+                if (p.kind == PopKind.ARROW) {
+                    LabeledSlider("Turn the arrow", "${p.rotation.roundToInt()}°", p.rotation, -180f..180f) { p = p.copy(rotation = it.roundToInt().toFloat()) }
+                } else {
+                    LabeledSlider("Tilt", "${p.rotation.roundToInt()}°", p.rotation, -45f..45f) { p = p.copy(rotation = it.roundToInt().toFloat()) }
+                }
 
                 Text("Movement (keyframe style)", style = MaterialTheme.typography.titleSmall)
                 Dropdown("Move", p.move.label, PopMove.entries, { it.label }) { p = p.copy(move = it) }

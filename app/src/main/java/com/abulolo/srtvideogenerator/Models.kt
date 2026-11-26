@@ -141,7 +141,14 @@ data class AmbienceSettings(
     val customName: String? = null
 )
 
-enum class PopKind { TEXT, IMAGE }
+enum class PopKind { TEXT, IMAGE, ARROW }
+
+enum class ArrowShape(val label: String) {
+    STRAIGHT("Straight arrow"),
+    BLOCK("Fat block arrow"),
+    CURVED("Curved arrow"),
+    HAND("Hand-drawn arrow")
+}
 
 enum class PopAnim(val label: String) {
     BOUNCE("Bounce pop"),
@@ -207,7 +214,9 @@ data class PopItem(
     /** true = goes there and comes back. */
     val moveBack: Boolean = false,
     /** Size at the end of the move relative to the start (1 = unchanged). */
-    val moveGrow: Float = 1f
+    val moveGrow: Float = 1f,
+    /** Look of the arrow (arrows only). The arrow points right at 0 degrees; [rotation] turns it. */
+    val arrowShape: ArrowShape = ArrowShape.STRAIGHT
 )
 
 data class ImageItem(

@@ -82,3 +82,6 @@ Effect dialog: preview pinned on top, drag and pinch to place/size the effect, n
 
 ## 6.0
 Player pinned on the Scenes tab, sideways scene strip with pinch zoom, clips play in the preview, several effects per scene, birds: whole flock in view and up to 40 birds.
+
+## 6.1
+Seconds shown on every scene tile; pop arrows (4 looks, colour, size, direction, animation, movement).
