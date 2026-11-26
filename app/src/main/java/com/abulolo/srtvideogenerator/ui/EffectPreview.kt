@@ -73,7 +73,7 @@ class EffectPreviewView(
             }
             rr.draw(null, t, 1f, 0, 1f, zoom, now, 0f, 0f, ox, oy)
             if (e.type != EffectType.SHAKE && e.type != EffectType.ZOOM_PULSE) {
-                rr.drawOverlay(e.type.ordinal, e.intensity, sp + 50f, alpha, e.regionX, e.regionY, e.regionW, e.regionH, e.scale)
+                rr.drawOverlay(e.type.ordinal, e.intensity, sp + 50f, alpha, e.regionX, e.regionY, e.regionW, e.regionH, e.scale, e.count)
             }
             GLES20.glFlush()
         }

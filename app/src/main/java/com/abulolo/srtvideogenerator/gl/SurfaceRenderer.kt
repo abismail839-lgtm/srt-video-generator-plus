@@ -178,7 +178,7 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
     /** Draws an overlay effect (EffectType ordinal 1..9) over the current frame. */
     fun drawOverlay(
         effect: Int, intensity: Float, timeSec: Float, alpha: Float,
-        rx: Float = 0.5f, ry: Float = 0.5f, rw: Float = 1f, rh: Float = 1f, scale: Float = 1f
+        rx: Float = 0.5f, ry: Float = 0.5f, rw: Float = 1f, rh: Float = 1f, scale: Float = 1f, count: Int = 6
     ) {
         // 10 = screen shake and 11 = zoom pulse are done by moving the picture, not by this shader
         if (effect <= 0 || effect == 10 || effect == 11 || effect > 27 || alpha <= 0.001f) return
@@ -200,6 +200,7 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
         GLES20.glUniform1f(u("uAlpha"), alpha.coerceIn(0f, 1f))
         GLES20.glUniform1f(u("uAspect"), (width * w0) / (height * h0))
         GLES20.glUniform1f(u("uScale"), scale.coerceIn(0.3f, 4f))
+        GLES20.glUniform1f(u("uCount"), count.toFloat())
         drawQuad(ovProgram)
         GLES20.glDisable(GLES20.GL_BLEND)
     }
@@ -417,6 +418,7 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
             uniform float uAlpha;
             uniform float uAspect;
             uniform float uScale;
+            uniform float uCount;
 
             float hash(vec2 p) {
                 return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -672,7 +674,7 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
                     float flock = 0.0;
                     float ph = fract(t * 0.16);
                     vec2 fc = vec2(-0.2 + 1.4 * ph, 0.38 + 0.05 * sin(t * 0.9));
-                    for (int bi = 0; bi < 9; bi++) {
+                    for (int bi = 0; bi < 20; bi++) {
                         float fi = float(bi);
                         float rank = floor((fi + 1.0) / 2.0);
                         float side = mod(fi, 2.0) * 2.0 - 1.0;
@@ -686,7 +688,7 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
                         float th = 0.16 * (1.0 - abs(bp.x) * 0.8);
                         float m = (1.0 - smoothstep(th * 0.5, max(th, 0.02), abs(bp.y - yw))) * step(abs(bp.x), 1.2);
                         m = max(m, 1.0 - smoothstep(0.1, 0.2, length(bp * vec2(1.0, 2.0))));
-                        float show = step(fi, 2.0 + I * 6.0);
+                        float show = step(fi + 0.5, uCount);
                         flock = max(flock, m * show);
                     }
                     over(acc, vec3(0.04, 0.04, 0.05), flock * 0.9);

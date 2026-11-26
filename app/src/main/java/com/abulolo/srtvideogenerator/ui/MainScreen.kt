@@ -9,6 +9,11 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.ui.input.pointer.pointerInput
@@ -627,39 +632,76 @@ private fun EffectDialog(vm: MainViewModel, index: Int, onAll: (EffectSettings) 
             }
         },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // The preview stays pinned here; only the controls below scroll.
                 val b = bmp
                 if (b == null) Text("Loading…")
-                else AndroidView(
-                    factory = { EffectPreviewView(it, b, params) },
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
-                )
-                OptionGrid("Effect", EffectType.entries, e.type, { it.label }, 3) { e = e.copy(type = it) }
-                if (e.type != EffectType.NONE) {
-                    LabeledSlider("Strength", "${(e.intensity * 100).roundToInt()}%", e.intensity, 0f..1f) { e = e.copy(intensity = it) }
-                    LabeledSlider("Speed", "%.1fx".format(e.speed), e.speed, 0.3f..3f) { e = e.copy(speed = (it * 10).roundToInt() / 10f) }
-                    LabeledSwitch("Only at the start of the image", e.onlyFirstSec != null) {
-                        e = e.copy(onlyFirstSec = if (it) 3f else null)
+                else {
+                    val showBox = e.type != EffectType.NONE && e.type != EffectType.SHAKE && e.type != EffectType.ZOOM_PULSE
+                    Box(
+                        Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                            .pointerInput(showBox) {
+                                if (showBox) detectTransformGestures { _, pan, zoom, _ ->
+                                    val w = size.width.toFloat().coerceAtLeast(1f)
+                                    val h = size.height.toFloat().coerceAtLeast(1f)
+                                    e = e.copy(
+                                        regionX = (e.regionX + pan.x / w).coerceIn(0f, 1f),
+                                        regionY = (e.regionY + pan.y / h).coerceIn(0f, 1f),
+                                        regionW = (e.regionW * zoom).coerceIn(0.1f, 1f),
+                                        regionH = (e.regionH * zoom).coerceIn(0.1f, 1f)
+                                    )
+                                }
+                            }
+                            .drawWithContent {
+                                drawContent()
+                                if (showBox && (e.regionW < 0.99f || e.regionH < 0.99f)) {
+                                    drawRect(
+                                        Color.White,
+                                        topLeft = Offset((e.regionX - e.regionW / 2f) * size.width, (e.regionY - e.regionH / 2f) * size.height),
+                                        size = Size(e.regionW * size.width, e.regionH * size.height),
+                                        style = Stroke(width = 3f)
+                                    )
+                                }
+                            }
+                    ) {
+                        AndroidView(
+                            factory = { EffectPreviewView(it, b, params) },
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
-                    e.onlyFirstSec?.let { sec ->
-                        LabeledSlider("Stays for", "%.1f s".format(sec), sec, 1f..10f) {
-                            e = e.copy(onlyFirstSec = (it * 2).roundToInt() / 2f)
+                    if (showBox) Text("Drag the picture to move the effect. Pinch with two fingers to make it bigger or smaller.", style = MaterialTheme.typography.bodySmall)
+                }
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OptionGrid("Effect", EffectType.entries, e.type, { it.label }, 3) { e = e.copy(type = it) }
+                    if (e.type != EffectType.NONE) {
+                        LabeledSlider("Strength", "${(e.intensity * 100).roundToInt()}%", e.intensity, 0f..1f) { e = e.copy(intensity = it) }
+                        LabeledSlider("Speed", "%.1fx".format(e.speed), e.speed, 0.3f..3f) { e = e.copy(speed = (it * 10).roundToInt() / 10f) }
+                        LabeledSwitch("Only at the start of the image", e.onlyFirstSec != null) {
+                            e = e.copy(onlyFirstSec = if (it) 3f else null)
                         }
-                    }
-                    if (e.type == EffectType.BIRDS) {
-                        LabeledSlider("Bird size (zoom)", "${(e.scale * 100).roundToInt()}%", e.scale, 0.4f..3f) { e = e.copy(scale = (it * 20).roundToInt() / 20f) }
-                    }
-                    if (e.type != EffectType.SHAKE && e.type != EffectType.ZOOM_PULSE) {
-                        Text("Size and place of the effect", style = MaterialTheme.typography.titleSmall)
-                        TextButton(onClick = { e = e.copy(regionX = 0.5f, regionY = 0.5f, regionW = 1f, regionH = 1f) }) { Text("Fill the whole screen") }
-                        LabeledSlider("Width", "${(e.regionW * 100).roundToInt()}%", e.regionW, 0.1f..1f) { e = e.copy(regionW = (it * 100).roundToInt() / 100f) }
-                        LabeledSlider("Height", "${(e.regionH * 100).roundToInt()}%", e.regionH, 0.1f..1f) { e = e.copy(regionH = (it * 100).roundToInt() / 100f) }
-                        LabeledSlider("Left to right", "${(e.regionX * 100).roundToInt()}%", e.regionX, 0f..1f) { e = e.copy(regionX = (it * 100).roundToInt() / 100f) }
-                        LabeledSlider("Up to down", "${(e.regionY * 100).roundToInt()}%", e.regionY, 0f..1f) { e = e.copy(regionY = (it * 100).roundToInt() / 100f) }
+                        e.onlyFirstSec?.let { sec ->
+                            LabeledSlider("Stays for", "%.1f s".format(sec), sec, 1f..10f) {
+                                e = e.copy(onlyFirstSec = (it * 2).roundToInt() / 2f)
+                            }
+                        }
+                        if (e.type == EffectType.BIRDS) {
+                            LabeledSlider("Number of birds", "${e.count}", e.count.toFloat(), 1f..20f) { e = e.copy(count = it.roundToInt()) }
+                            LabeledSlider("Bird size (zoom)", "${(e.scale * 100).roundToInt()}%", e.scale, 0.4f..3f) { e = e.copy(scale = (it * 20).roundToInt() / 20f) }
+                        }
+                        if (e.type != EffectType.SHAKE && e.type != EffectType.ZOOM_PULSE) {
+                            Text("Size and place of the effect", style = MaterialTheme.typography.titleSmall)
+                            TextButton(onClick = { e = e.copy(regionX = 0.5f, regionY = 0.5f, regionW = 1f, regionH = 1f) }) { Text("Fill the whole screen") }
+                            LabeledSlider("Width", "${(e.regionW * 100).roundToInt()}%", e.regionW, 0.1f..1f) { e = e.copy(regionW = (it * 100).roundToInt() / 100f) }
+                            LabeledSlider("Height", "${(e.regionH * 100).roundToInt()}%", e.regionH, 0.1f..1f) { e = e.copy(regionH = (it * 100).roundToInt() / 100f) }
+                            LabeledSlider("Left to right", "${(e.regionX * 100).roundToInt()}%", e.regionX, 0f..1f) { e = e.copy(regionX = (it * 100).roundToInt() / 100f) }
+                            LabeledSlider("Up to down", "${(e.regionY * 100).roundToInt()}%", e.regionY, 0f..1f) { e = e.copy(regionY = (it * 100).roundToInt() / 100f) }
+                        }
                     }
                 }
             }
-        }
+        },
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.fillMaxWidth(0.96f)
     )
 }
 

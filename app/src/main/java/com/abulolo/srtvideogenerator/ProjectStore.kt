@@ -77,7 +77,7 @@ class ProjectStore(context: Context) {
             if (e.type != EffectType.NONE) {
                 j.put("fx", JSONObject().put("t", e.type.name).put("i", e.intensity.toDouble())
                     .put("s", e.speed.toDouble()).put("rx", e.regionX.toDouble()).put("ry", e.regionY.toDouble())
-                    .put("rw", e.regionW.toDouble()).put("rh", e.regionH.toDouble()).put("sc", e.scale.toDouble())
+                    .put("rw", e.regionW.toDouble()).put("rh", e.regionH.toDouble()).put("sc", e.scale.toDouble()).put("ct", e.count)
                     .apply { e.onlyFirstSec?.let { put("o", it.toDouble()) } })
             }
             val a = im.ambience
@@ -149,7 +149,7 @@ class ProjectStore(context: Context) {
                     speed = fx.optDouble("s", 1.0).toFloat(),
                     onlyFirstSec = if (fx.has("o")) fx.optDouble("o").toFloat() else null,
                     regionX = fx.optDouble("rx", 0.5).toFloat(), regionY = fx.optDouble("ry", 0.5).toFloat(),
-                    regionW = fx.optDouble("rw", 1.0).toFloat(), regionH = fx.optDouble("rh", 1.0).toFloat(), scale = fx.optDouble("sc", 1.0).toFloat()
+                    regionW = fx.optDouble("rw", 1.0).toFloat(), regionH = fx.optDouble("rh", 1.0).toFloat(), scale = fx.optDouble("sc", 1.0).toFloat(), count = fx.optInt("ct", 6)
                 ),
                 ambience = if (amb == null) AmbienceSettings() else AmbienceSettings(
                     type = amb.getEnum("t", AmbienceType.NONE),

@@ -76,3 +76,6 @@ Birds fly as one compact flock; Bird size (zoom) slider.
 
 ## 5.8
 New layout: top bar (undo, settings, Export), bottom tabs (Story, Scenes, Look, Audio, Export), settings page (colours, backup), whole voice-over player, compact scene grid with pinch zoom, scene editor split in parts, square option grids, compact bird flock.
+
+## 5.9
+Effect dialog: preview pinned on top, drag and pinch to place/size the effect, number of birds slider.
