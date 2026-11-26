@@ -168,13 +168,13 @@ class NativeMediaGenerator(private val context: Context) {
             // Animated clips: fetch the right frame for this moment and put it into the scene's texture.
             fun updateVideo(i: Int, t: Long) {
                 if (!req.images[i].isVideo) return
-                val clip = clips.getOrPut(i) { VideoClip(context, req.images[i].uri, max(w, h)) }
+                val clip = clips.getOrPut(i) { VideoClip(context, req.images[i].uri, max(w, h), sequential = true) }
                 val local = (t - timeline.scenes[i].startUs).coerceAtLeast(0L)
                 val shown = minOf(local, (clip.durationUs - 1L).coerceAtLeast(0L)) // freeze on the last frame
                 val key = shown / frameUs
                 if (clipKey[i] == key) return
                 val bmp = clip.frame(shown) ?: return
-                try { textures[i] = r.replaceTexture(tex(i), bmp) } finally { bmp.recycle() }
+                try { textures[i] = r.replaceTexture(tex(i), bmp) } finally { if (!clip.ownsFrames) bmp.recycle() }
                 clipKey[i] = key
             }
 
@@ -419,13 +419,27 @@ class NativeMediaGenerator(private val context: Context) {
     }
 }
 
-/** Frames of an animated clip, fetched one at a time (sound is ignored). */
-class VideoClip(context: Context, uri: Uri, private val maxSide: Int) {
+/**
+ * Frames of an animated clip (sound is ignored). With [sequential] the clip is decoded once from start to end
+ * (fast, used by the exporter); if that fails it falls back to asking for each frame separately (slow but safe).
+ */
+class VideoClip(context: Context, uri: Uri, private val maxSide: Int, sequential: Boolean = false) {
     private val retriever = MediaMetadataRetriever().apply { setDataSource(context, uri) }
     val durationUs: Long = (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
         ?.toLongOrNull() ?: 0L) * 1000L
+    private var dec: ClipDecoder? = if (sequential) try { ClipDecoder(context, uri, maxSide) } catch (_: Exception) { null } else null
+
+    /** true = the returned bitmap belongs to the clip, the caller must not recycle it. */
+    val ownsFrames: Boolean get() = dec != null
 
     fun frame(timeUs: Long): Bitmap? {
+        val d = dec
+        if (d != null) {
+            val b = try { d.frameAt(timeUs) } catch (_: Exception) { null }
+            if (b != null) return b
+            try { d.close() } catch (_: Exception) {}
+            dec = null
+        }
         val raw = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST) ?: return null
         val big = max(raw.width, raw.height)
         if (big <= maxSide) return raw
@@ -435,7 +449,139 @@ class VideoClip(context: Context, uri: Uri, private val maxSide: Int) {
         return scaled
     }
 
-    fun close() { try { retriever.release() } catch (_: Exception) {} }
+    fun close() {
+        try { dec?.close() } catch (_: Exception) {}
+        dec = null
+        try { retriever.release() } catch (_: Exception) {}
+    }
+}
+
+/** Plays a clip forward with MediaCodec and turns the frames into bitmaps. Only moves forward in time. */
+class ClipDecoder(context: Context, uri: Uri, private val maxSide: Int) {
+    private val extractor = MediaExtractor()
+    private val codec: MediaCodec
+    private val info = MediaCodec.BufferInfo()
+    private var rotation = 0
+    private var inputDone = false
+    private var eos = false
+    private var cur: Bitmap? = null
+    private var ahead: Bitmap? = null
+    private var aheadPts = Long.MAX_VALUE
+
+    init {
+        extractor.setDataSource(context, uri, null)
+        var track = -1
+        var fmt: MediaFormat? = null
+        for (i in 0 until extractor.trackCount) {
+            val f = extractor.getTrackFormat(i)
+            if (f.getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true) { track = i; fmt = f; break }
+        }
+        require(track >= 0 && fmt != null) { "no video track" }
+        extractor.selectTrack(track)
+        rotation = if (fmt.containsKey(MediaFormat.KEY_ROTATION)) fmt.getInteger(MediaFormat.KEY_ROTATION) else 0
+        fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
+        codec = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
+        codec.configure(fmt, null, null, 0)
+        codec.start()
+    }
+
+    /** The newest frame that is not later than [timeUs]. The bitmap belongs to the decoder. */
+    fun frameAt(timeUs: Long): Bitmap? {
+        while (true) {
+            if (ahead != null && aheadPts <= timeUs) {
+                cur?.recycle(); cur = ahead; ahead = null; aheadPts = Long.MAX_VALUE
+            }
+            if (ahead != null) break
+            if (eos) break
+            val f = decodeOne() ?: break
+            ahead = f.first; aheadPts = f.second
+        }
+        return cur ?: ahead
+    }
+
+    private fun decodeOne(): Pair<Bitmap, Long>? {
+        if (eos) return null
+        var spins = 0
+        while (spins < 3000) {
+            if (!inputDone) {
+                val ii = codec.dequeueInputBuffer(0)
+                if (ii >= 0) {
+                    val buf = codec.getInputBuffer(ii)!!
+                    val n = extractor.readSampleData(buf, 0)
+                    if (n < 0) {
+                        codec.queueInputBuffer(ii, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        inputDone = true
+                    } else {
+                        codec.queueInputBuffer(ii, 0, n, extractor.sampleTime, 0)
+                        extractor.advance()
+                    }
+                }
+            }
+            val oi = codec.dequeueOutputBuffer(info, 10_000)
+            if (oi >= 0) {
+                val last = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                var result: Pair<Bitmap, Long>? = null
+                if (info.size > 0) {
+                    val img = codec.getOutputImage(oi)
+                    if (img != null) {
+                        try { result = toBitmap(img) to info.presentationTimeUs } finally { img.close() }
+                    }
+                }
+                codec.releaseOutputBuffer(oi, false)
+                if (last) eos = true
+                if (result != null) return result
+                if (eos) return null
+            } else if (oi == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                spins++
+            }
+        }
+        eos = true
+        return null
+    }
+
+    private fun toBitmap(img: android.media.Image): Bitmap {
+        val crop = img.cropRect
+        val cw = crop.width()
+        val ch = crop.height()
+        val step = ((max(cw, ch) + maxSide - 1) / maxSide).coerceAtLeast(1)
+        val ow = (cw / step).coerceAtLeast(1)
+        val oh = (ch / step).coerceAtLeast(1)
+        val yP = img.planes[0]; val uP = img.planes[1]; val vP = img.planes[2]
+        val yB = yP.buffer; val uB = uP.buffer; val vB = vP.buffer
+        val yRow = yP.rowStride; val yPix = yP.pixelStride
+        val uvRow = uP.rowStride; val uvPix = uP.pixelStride
+        val px = IntArray(ow * oh)
+        for (j in 0 until oh) {
+            val y = crop.top + j * step
+            for (i in 0 until ow) {
+                val x = crop.left + i * step
+                val yy = (yB.get(y * yRow + x * yPix).toInt() and 0xFF) - 16
+                val ui = (y shr 1) * uvRow + (x shr 1) * uvPix
+                val u = (uB.get(ui).toInt() and 0xFF) - 128
+                val v = (vB.get(ui).toInt() and 0xFF) - 128
+                val y298 = 298 * yy + 128
+                val r = ((y298 + 459 * v) shr 8).coerceIn(0, 255)
+                val g = ((y298 - 55 * u - 136 * v) shr 8).coerceIn(0, 255)
+                val b = ((y298 + 541 * u) shr 8).coerceIn(0, 255)
+                px[j * ow + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+        val bmp = Bitmap.createBitmap(px, ow, oh, Bitmap.Config.ARGB_8888)
+        if (rotation == 0) return bmp
+        val m = Matrix().apply { postRotate(rotation.toFloat()) }
+        val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+        if (rotated !== bmp) bmp.recycle()
+        return rotated
+    }
+
+    fun close() {
+        try { codec.stop() } catch (_: Exception) {}
+        try { codec.release() } catch (_: Exception) {}
+        try { extractor.release() } catch (_: Exception) {}
+        try { cur?.recycle() } catch (_: Exception) {}
+        try { ahead?.recycle() } catch (_: Exception) {}
+        cur = null; ahead = null
+    }
 }
 
 object BitmapLoader {

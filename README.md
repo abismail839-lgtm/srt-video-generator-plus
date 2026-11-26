@@ -85,3 +85,7 @@ Player pinned on the Scenes tab, sideways scene strip with pinch zoom, clips pla
 
 ## 6.1
 Seconds shown on every scene tile; pop arrows (4 looks, colour, size, direction, animation, movement).
+
+## 6.2
+- Pop editor: the preview now stays pinned while the settings scroll; drag to move, pinch to resize.
+- Faster rendering: animated clips are decoded in one pass instead of one slow lookup per frame; shorter loudness scan.

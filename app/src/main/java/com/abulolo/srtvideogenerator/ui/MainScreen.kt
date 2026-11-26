@@ -1211,14 +1211,32 @@ private fun PopDialog(vm: MainViewModel, scene: Int, initial: PopItem, onClose: 
         confirmButton = { TextButton(onClick = { vm.upsertPop(scene, p); onClose() }) { Text("Done") } },
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // The preview stays pinned here; only the settings below it scroll.
                 val b = bg
                 if (b == null) Text("Loading preview…")
-                else AndroidView(
-                    factory = { PopPreviewView(it, b, params) },
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
-                )
-                Text("The preview repeats and shows exactly how it will look.", style = MaterialTheme.typography.bodySmall)
+                else Box(
+                    Modifier.fillMaxWidth().aspectRatio(16f / 9f).pointerInput(p.kind) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            val w = size.width.toFloat().coerceAtLeast(1f)
+                            val h = size.height.toFloat().coerceAtLeast(1f)
+                            val lo = if (p.kind == PopKind.IMAGE) 0.05f else 0.3f
+                            val hi = if (p.kind == PopKind.IMAGE) 1f else 3f
+                            p = p.copy(
+                                x = (p.x + pan.x / w).coerceIn(0f, 1f),
+                                y = (p.y + pan.y / h).coerceIn(0f, 1f),
+                                size = (p.size * zoom).coerceIn(lo, hi)
+                            )
+                        }
+                    }
+                ) {
+                    AndroidView(
+                        factory = { PopPreviewView(it, b, params) },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                Text("Drag it to move it. Pinch with two fingers to make it bigger or smaller.", style = MaterialTheme.typography.bodySmall)
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 
                 if (p.kind == PopKind.TEXT) {
                     OutlinedTextField(
@@ -1306,8 +1324,11 @@ private fun PopDialog(vm: MainViewModel, scene: Int, initial: PopItem, onClose: 
                         p = p.copy(soundVolume = (it * 100).roundToInt() / 100f)
                     }
                 }
+                }
             }
-        }
+        },
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.fillMaxWidth(0.96f)
     )
 }
 
