@@ -248,8 +248,8 @@ class NativeMediaGenerator(private val context: Context) {
         }
     }
 
-    private fun effectOf(req: RenderRequest, scene: Int): EffectSettings? =
-        req.images.getOrNull(scene)?.effect?.takeIf { it.type != EffectType.NONE }
+    private fun effectsOf(req: RenderRequest, scene: Int): List<EffectSettings> =
+        req.images.getOrNull(scene)?.allEffects() ?: emptyList()
 
     /** Fades the effect out after "only first N seconds" (0.6 s fade). */
     private fun effectAlpha(e: EffectSettings, tl: Timeline, scene: Int, t: Long): Float {
@@ -263,8 +263,8 @@ class NativeMediaGenerator(private val context: Context) {
         var zoom = zoomScale(req, tl, scene, t)
         var ox = 0f
         var oy = 0f
-        val e = effectOf(req, scene)
-        if (e != null && (e.type == EffectType.SHAKE || e.type == EffectType.ZOOM_PULSE)) {
+        for (e in effectsOf(req, scene)) {
+            if (e.type != EffectType.SHAKE && e.type != EffectType.ZOOM_PULSE) continue
             val a = effectAlpha(e, tl, scene, t)
             val local = (t - tl.scenes[scene].startUs) / 1_000_000f * e.speed
             if (e.type == EffectType.SHAKE) {
@@ -282,10 +282,11 @@ class NativeMediaGenerator(private val context: Context) {
     }
 
     private fun drawSceneOverlay(r: SurfaceRenderer, req: RenderRequest, tl: Timeline, scene: Int, t: Long, mix: Float) {
-        val e = effectOf(req, scene) ?: return
-        if (e.type == EffectType.SHAKE || e.type == EffectType.ZOOM_PULSE) return
-        val local = (t - tl.scenes[scene].startUs) / 1_000_000f * e.speed + 50f
-        r.drawOverlay(e.type.ordinal, e.intensity, local, effectAlpha(e, tl, scene, t) * mix, e.regionX, e.regionY, e.regionW, e.regionH, e.scale, e.count)
+        for (e in effectsOf(req, scene)) {
+            if (e.type == EffectType.SHAKE || e.type == EffectType.ZOOM_PULSE) continue
+            val local = (t - tl.scenes[scene].startUs) / 1_000_000f * e.speed + 50f
+            r.drawOverlay(e.type.ordinal, e.intensity, local, effectAlpha(e, tl, scene, t) * mix, e.regionX, e.regionY, e.regionW, e.regionH, e.scale, e.count)
+        }
     }
 
     private fun zoomScale(req: RenderRequest, tl: Timeline, scene: Int, t: Long): Float {

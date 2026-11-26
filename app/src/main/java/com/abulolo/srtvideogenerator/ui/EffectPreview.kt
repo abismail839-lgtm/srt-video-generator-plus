@@ -19,6 +19,8 @@ import kotlin.math.sin
 
 class EffectPreviewParams {
     @Volatile var settings: EffectSettings = EffectSettings()
+    /** More effects drawn together with [settings]. */
+    @Volatile var others: List<EffectSettings> = emptyList()
 }
 
 class EffectPreviewView(
@@ -72,6 +74,12 @@ class EffectPreviewView(
                 zoom = 1f + 0.09f * e.intensity * alpha * exp(-ph * 6f)
             }
             rr.draw(null, t, 1f, 0, 1f, zoom, now, 0f, 0f, ox, oy)
+            for (x in params.others) {
+                if (x.type == EffectType.NONE || x.type == EffectType.SHAKE || x.type == EffectType.ZOOM_PULSE) continue
+                val xl = ((x.onlyFirstSec ?: 4f) + 2f).let { now % it }
+                val xa = x.onlyFirstSec?.let { ((it - xl) / 0.6f).coerceIn(0f, 1f) } ?: 1f
+                rr.drawOverlay(x.type.ordinal, x.intensity, xl * x.speed + 50f, xa, x.regionX, x.regionY, x.regionW, x.regionH, x.scale, x.count)
+            }
             if (e.type != EffectType.SHAKE && e.type != EffectType.ZOOM_PULSE) {
                 rr.drawOverlay(e.type.ordinal, e.intensity, sp + 50f, alpha, e.regionX, e.regionY, e.regionW, e.regionH, e.scale, e.count)
             }

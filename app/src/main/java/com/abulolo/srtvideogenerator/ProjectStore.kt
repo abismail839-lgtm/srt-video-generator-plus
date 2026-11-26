@@ -58,6 +58,22 @@ class ProjectStore(context: Context) {
     private inline fun <reified E : Enum<E>> JSONObject.getEnum(key: String, default: E): E =
         try { getStr(key)?.let { enumValueOf<E>(it) } ?: default } catch (_: Exception) { default }
 
+    private fun fxToJson(e: EffectSettings): JSONObject =
+        JSONObject().put("t", e.type.name).put("i", e.intensity.toDouble())
+            .put("s", e.speed.toDouble()).put("rx", e.regionX.toDouble()).put("ry", e.regionY.toDouble())
+            .put("rw", e.regionW.toDouble()).put("rh", e.regionH.toDouble()).put("sc", e.scale.toDouble()).put("ct", e.count)
+            .apply { e.onlyFirstSec?.let { put("o", it.toDouble()) } }
+
+    private fun fxFromJson(fx: JSONObject): EffectSettings = EffectSettings(
+        type = fx.getEnum("t", EffectType.NONE),
+        intensity = fx.optDouble("i", 0.6).toFloat(),
+        speed = fx.optDouble("s", 1.0).toFloat(),
+        onlyFirstSec = if (fx.has("o")) fx.optDouble("o").toFloat() else null,
+        regionX = fx.optDouble("rx", 0.5).toFloat(), regionY = fx.optDouble("ry", 0.5).toFloat(),
+        regionW = fx.optDouble("rw", 1.0).toFloat(), regionH = fx.optDouble("rh", 1.0).toFloat(),
+        scale = fx.optDouble("sc", 1.0).toFloat(), count = fx.optInt("ct", 8)
+    )
+
     private fun toJson(p: ProjectData): JSONObject {
         val o = JSONObject()
         o.put("v", 1)
@@ -74,11 +90,11 @@ class ProjectStore(context: Context) {
             im.transition?.let { j.put("tr", it.name) }
             im.sfx?.let { j.put("sfx", it.name) }
             val e = im.effect
-            if (e.type != EffectType.NONE) {
-                j.put("fx", JSONObject().put("t", e.type.name).put("i", e.intensity.toDouble())
-                    .put("s", e.speed.toDouble()).put("rx", e.regionX.toDouble()).put("ry", e.regionY.toDouble())
-                    .put("rw", e.regionW.toDouble()).put("rh", e.regionH.toDouble()).put("sc", e.scale.toDouble()).put("ct", e.count)
-                    .apply { e.onlyFirstSec?.let { put("o", it.toDouble()) } })
+            if (e.type != EffectType.NONE) j.put("fx", fxToJson(e))
+            if (im.extraEffects.isNotEmpty()) {
+                val fa = JSONArray()
+                for (x in im.extraEffects) fa.put(fxToJson(x))
+                j.put("fx2", fa)
             }
             val a = im.ambience
             if (a.type != AmbienceType.NONE) {
@@ -143,14 +159,8 @@ class ProjectStore(context: Context) {
                 pops = pops,
                 transition = j.getStr("tr")?.let { try { enumValueOf<TransitionType>(it) } catch (_: Exception) { null } },
                 sfx = j.getStr("sfx")?.let { try { enumValueOf<SfxChoice>(it) } catch (_: Exception) { null } },
-                effect = if (fx == null) EffectSettings() else EffectSettings(
-                    type = fx.getEnum("t", EffectType.NONE),
-                    intensity = fx.optDouble("i", 0.6).toFloat(),
-                    speed = fx.optDouble("s", 1.0).toFloat(),
-                    onlyFirstSec = if (fx.has("o")) fx.optDouble("o").toFloat() else null,
-                    regionX = fx.optDouble("rx", 0.5).toFloat(), regionY = fx.optDouble("ry", 0.5).toFloat(),
-                    regionW = fx.optDouble("rw", 1.0).toFloat(), regionH = fx.optDouble("rh", 1.0).toFloat(), scale = fx.optDouble("sc", 1.0).toFloat(), count = fx.optInt("ct", 6)
-                ),
+                effect = if (fx == null) EffectSettings() else fxFromJson(fx),
+                extraEffects = j.optJSONArray("fx2")?.let { arr -> (0 until arr.length()).map { k -> fxFromJson(arr.getJSONObject(k)) } } ?: emptyList(),
                 ambience = if (amb == null) AmbienceSettings() else AmbienceSettings(
                     type = amb.getEnum("t", AmbienceType.NONE),
                     volume = amb.optDouble("v", 0.25).toFloat(),

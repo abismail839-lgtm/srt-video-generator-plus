@@ -142,7 +142,7 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     }
 
     var previewIndex by remember { mutableStateOf<Int?>(null) }
-    var effectIndex by remember { mutableStateOf<Int?>(null) }
+    var effectEdit by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var ambienceIndex by remember { mutableStateOf<Int?>(null) }
     var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     var selected by rememberSaveable { mutableStateOf(0) }
@@ -189,7 +189,40 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         if (s.rendering) {
             LinearProgressIndicator(progress = { s.progress }, modifier = Modifier.fillMaxWidth())
         }
-        LazyColumn(
+        if (tab == 1) {
+            if (s.images.isEmpty()) {
+                Text("Add your pictures first (Story tab), then your scenes appear here.", Modifier.padding(16.dp))
+                Spacer(Modifier.weight(1f))
+            } else {
+                val sel = selected.coerceIn(0, s.images.lastIndex)
+                // The player stays here, pinned. Only what is below it scrolls.
+                Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    ScenePlayer(vm = vm, s = s, index = sel, onFollow = { selected = it })
+                }
+                Column(
+                    Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    SceneStrip(
+                        s = s, selected = sel,
+                        onPick = { i -> selected = i; s.sceneStartsMs.getOrNull(i)?.let { vm.seekAll(it) } }
+                    )
+                    SceneEditor(
+                        vm = vm, s = s, index = sel,
+                        onSelect = { i -> selected = i; s.sceneStartsMs.getOrNull(i)?.let { vm.seekAll(it) } },
+                        onEffect = { scene, k -> effectEdit = scene to k },
+                        onAmbience = { ambienceIndex = it },
+                        onPreview = { previewIndex = it },
+                        onConfirm = { msg, action -> confirm = msg to action },
+                        onAddPopText = { idx ->
+                            popEdit = idx to PopItem(id = System.nanoTime(), kind = PopKind.TEXT, text = "Your text", size = 1f)
+                        },
+                        onAddPopImage = { idx -> pickForScene = idx; popImagePicker.launch(arrayOf("image/*")) },
+                        onEditPop = { idx, pop -> popEdit = idx to pop }
+                    )
+                }
+            }
+        } else LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -261,44 +294,6 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
             }
         }
 
-        }
-
-        if (tab == 1) {
-        // ---------------- scenes tab ----------------
-        if (s.images.isNotEmpty()) {
-            item {
-                ScenePlayer(
-                    vm = vm, s = s, index = selected.coerceIn(0, s.images.lastIndex),
-                    onFollow = { selected = it }
-                )
-            }
-            item {
-                SceneGrid(
-                    s = s, selected = selected.coerceIn(0, s.images.lastIndex),
-                    onPick = { i ->
-                        selected = i
-                        s.sceneStartsMs.getOrNull(i)?.let { vm.seekAll(it) }
-                    }
-                )
-            }
-            item {
-                SceneEditor(
-                    vm = vm, s = s, index = selected.coerceIn(0, s.images.lastIndex),
-                    onSelect = { i -> selected = i; s.sceneStartsMs.getOrNull(i)?.let { vm.seekAll(it) } },
-                    onEffect = { effectIndex = it },
-                    onAmbience = { ambienceIndex = it },
-                    onPreview = { previewIndex = it },
-                    onConfirm = { msg, action -> confirm = msg to action },
-                    onAddPopText = { idx ->
-                        popEdit = idx to PopItem(id = System.nanoTime(), kind = PopKind.TEXT, text = "Your text", size = 1f)
-                    },
-                    onAddPopImage = { idx -> pickForScene = idx; popImagePicker.launch(arrayOf("image/*")) },
-                    onEditPop = { idx, pop -> popEdit = idx to pop }
-                )
-            }
-        } else {
-            item { Text("Add your pictures first (Story tab), then your scenes appear here.") }
-        }
         }
 
         if (tab == 2) {
@@ -499,8 +494,8 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
     previewIndex?.let { i ->
         PreviewDialog(vm, i) { previewIndex = null }
     }
-    effectIndex?.let { i ->
-        EffectDialog(vm, i, onAll = { applyAllEffect = it }) { effectIndex = null }
+    effectEdit?.let { (i, k) ->
+        EffectDialog(vm, i, k, onAll = { applyAllEffect = it }) { effectEdit = null }
     }
     ambienceIndex?.let { i ->
         AmbienceDialog(vm, i, onAll = { applyAllAmbience = it }) { ambienceIndex = null }
@@ -519,7 +514,7 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         )
     }
     applyAllEffect?.let { e ->
-        val filled = s.images.count { it.effect.type != EffectType.NONE }
+        val filled = s.images.count { it.allEffects().isNotEmpty() }
         ApplyAllDialog(
             what = if (e.type == EffectType.NONE) "REMOVE the effect from" else "put \"${e.type.label}\" on",
             total = s.images.size, filled = filled, filledWhat = "already have an effect",
@@ -609,21 +604,28 @@ private fun AmbienceDialog(vm: MainViewModel, index: Int, onAll: (AmbienceSettin
 }
 
 @Composable
-private fun EffectDialog(vm: MainViewModel, index: Int, onAll: (EffectSettings) -> Unit, onClose: () -> Unit) {
+private fun EffectDialog(vm: MainViewModel, index: Int, effIdx: Int, onAll: (EffectSettings) -> Unit, onClose: () -> Unit) {
     val s by vm.state.collectAsState()
     val ctx = LocalContext.current
     if (index !in s.images.indices) { onClose(); return }
-    var e by remember { mutableStateOf(s.images[index].effect) }
+    val effs = s.images[index].allEffects()
+    var e by remember { mutableStateOf(effs.getOrNull(effIdx) ?: EffectSettings()) }
     val params = remember { EffectPreviewParams() }
     params.settings = e
+    params.others = effs.filterIndexed { n, _ -> n != effIdx }
     val bmp by produceState<Bitmap?>(null, s.images[index].uri) {
         value = withContext(Dispatchers.IO) { try { BitmapLoader.decode(ctx, s.images[index].uri, 640) } catch (_: Exception) { null } }
     }
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Effect for image ${index + 1}") },
+        title = { Text(if (effIdx < effs.size) "Effect ${effIdx + 1} of scene ${index + 1}" else "New effect for scene ${index + 1}") },
         confirmButton = {
-            TextButton(onClick = { vm.setImageEffect(index, e); onClose() }) { Text("Apply") }
+            TextButton(onClick = {
+                val l = effs.toMutableList()
+                if (effIdx < l.size) l[effIdx] = e else l.add(e)
+                vm.setSceneEffects(index, l)
+                onClose()
+            }) { Text("Apply") }
         },
         dismissButton = {
             Row {
@@ -685,7 +687,7 @@ private fun EffectDialog(vm: MainViewModel, index: Int, onAll: (EffectSettings) 
                             }
                         }
                         if (e.type == EffectType.BIRDS) {
-                            LabeledSlider("Number of birds", "${e.count}", e.count.toFloat(), 1f..20f) { e = e.copy(count = it.roundToInt()) }
+                            LabeledSlider("Number of birds", "${e.count}", e.count.toFloat(), 1f..40f) { e = e.copy(count = it.roundToInt()) }
                             LabeledSlider("Bird size (zoom)", "${(e.scale * 100).roundToInt()}%", e.scale, 0.4f..3f) { e = e.copy(scale = (it * 20).roundToInt() / 20f) }
                         }
                         if (e.type != EffectType.SHAKE && e.type != EffectType.ZOOM_PULSE) {
@@ -829,20 +831,41 @@ private fun ScenePlayer(vm: MainViewModel, s: UiState, index: Int, onFollow: (In
     val img = s.images[index]
     val params = remember { EffectPreviewParams() }
     params.settings = img.effect
+    params.others = img.extraEffects
     val bmp by produceState<Bitmap?>(null, img.uri) {
         value = withContext(Dispatchers.IO) { try { BitmapLoader.decode(ctx, img.uri, 640) } catch (_: Exception) { null } }
     }
     fun mmss(ms: Long): String { val sec = (ms / 1000).toInt(); return "${sec / 60}:${"%02d".format(sec % 60)}" }
-    Section("Player") {
-        val b = bmp
-        if (b != null) {
-            key(index, b) {
-                AndroidView(
-                    factory = { EffectPreviewView(it, b, params) },
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
-                )
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Box(Modifier.fillMaxWidth(0.62f).align(Alignment.CenterHorizontally).aspectRatio(16f / 9f).background(Color.Black)) {
+            if (img.isVideo) {
+                // A clip plays here (effects are added in the final video, not in this small preview).
+                key(img.uri) {
+                    AndroidView(
+                        factory = { c ->
+                            android.widget.VideoView(c).apply {
+                                setVideoURI(img.uri)
+                                setOnPreparedListener { mp -> mp.isLooping = true; mp.setVolume(0f, 0f); start() }
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            } else {
+                val b = bmp
+                if (b != null) {
+                    key(index, b) {
+                        AndroidView(
+                            factory = { EffectPreviewView(it, b, params) },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                } else Text("Loading preview…", color = Color.White, modifier = Modifier.align(Alignment.Center))
             }
-        } else Text("Loading preview…")
+        }
         if (s.audio.voiceUri == null || starts.isEmpty()) {
             Text("Add the voice-over and the SRT (Story tab) to listen to your whole voice-over here.", style = MaterialTheme.typography.bodySmall)
         } else {
@@ -865,18 +888,26 @@ private fun ScenePlayer(vm: MainViewModel, s: UiState, index: Int, onFollow: (In
                     vm.seekAll(starts.getOrNull((index + 1).coerceAtMost(s.images.lastIndex)) ?: 0L)
                 }) { Text("⏭") }
             }
-            Text("Scene ${index + 1} of ${s.images.size}  ·  ${mmss(pos)} / ${mmss(totalMs)}", style = MaterialTheme.typography.bodySmall)
         }
+        Text(
+            "Scene ${index + 1} of ${s.images.size}" + (if (starts.isNotEmpty()) "  ·  ${mmss(pos)} / ${mmss(totalMs)}" else ""),
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
 @Composable
-private fun SceneGrid(s: UiState, selected: Int, onPick: (Int) -> Unit) {
-    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+private fun SceneStrip(s: UiState, selected: Int, onPick: (Int) -> Unit) {
+    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    var tile by rememberSaveable { mutableStateOf(72f) }
+    var tile by rememberSaveable { mutableStateOf(84f) }
     var jump by remember { mutableStateOf("") }
-    Section("Scenes (pinch to zoom, tap one to edit it)") {
+    LaunchedEffect(selected) { // keep the chosen scene in view
+        val first = listState.firstVisibleItemIndex
+        val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: first
+        if (selected < first || selected > last) listState.animateScrollToItem(selected)
+    }
+    Section("Scenes (swipe sideways, pinch to zoom)") {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = jump, onValueChange = { jump = it.filter(Char::isDigit).take(5) },
@@ -887,13 +918,12 @@ private fun SceneGrid(s: UiState, selected: Int, onPick: (Int) -> Unit) {
             Button(onClick = {
                 val n = (jump.toIntOrNull() ?: return@Button).coerceIn(1, s.images.size) - 1
                 onPick(n)
-                scope.launch { gridState.animateScrollToItem(n) }
+                scope.launch { listState.animateScrollToItem(n) }
             }) { Text("Go") }
         }
-        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(tile.dp),
-            state = gridState,
-            modifier = Modifier.fillMaxWidth().height(300.dp).pointerInput(Unit) {
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     do {
@@ -901,32 +931,30 @@ private fun SceneGrid(s: UiState, selected: Int, onPick: (Int) -> Unit) {
                         if (ev.changes.size >= 2) {
                             val z = ev.calculateZoom()
                             if (z != 1f) {
-                                tile = (tile * z).coerceIn(48f, 160f)
+                                tile = (tile * z).coerceIn(52f, 180f)
                                 ev.changes.forEach { it.consume() }
                             }
                         }
                     } while (ev.changes.any { it.pressed })
                 }
             },
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            items(s.images.size) { i ->
-                val img = s.images[i]
+            itemsIndexed(s.images) { i, img ->
                 val sel = i == selected
                 Box(
                     Modifier
-                        .aspectRatio(1f)
+                        .size(tile.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .border(if (sel) 3.dp else 1.dp, if (sel) MaterialTheme.colorScheme.primary else Color(0x55888888), RoundedCornerShape(8.dp))
                         .clickable { onPick(i) }
                 ) {
-                    Thumb(img.uri, 160.dp)
-                    val marks = (if (img.effect.type != EffectType.NONE) "✨" else "") +
+                    Thumb(img.uri, 180.dp)
+                    val marks = (if (img.allEffects().isNotEmpty()) "✨" else "") +
                         (if (img.ambience.type != AmbienceType.NONE) "🎧" else "") +
                         (if (img.pops.isNotEmpty()) "💬" else "")
                     Text(
-                        "${i + 1}${if (img.isVideo) "🎬" else ""}" + (if (tile >= 64f) marks else ""),
+                        "${i + 1}${if (img.isVideo) "🎬" else ""}" + (if (tile >= 70f) marks else ""),
                         Modifier.align(Alignment.BottomStart).background(Color(0xAA000000)).padding(horizontal = 4.dp),
                         color = Color.White, style = MaterialTheme.typography.labelSmall, maxLines = 1
                     )
@@ -998,7 +1026,7 @@ private fun SettingsPage(s: UiState, onBack: () -> Unit, onSaveBackup: () -> Uni
 @Composable
 private fun SceneEditor(
     vm: MainViewModel, s: UiState, index: Int,
-    onSelect: (Int) -> Unit, onEffect: (Int) -> Unit, onAmbience: (Int) -> Unit, onPreview: (Int) -> Unit,
+    onSelect: (Int) -> Unit, onEffect: (Int, Int) -> Unit, onAmbience: (Int) -> Unit, onPreview: (Int) -> Unit,
     onConfirm: (String, () -> Unit) -> Unit,
     onAddPopText: (Int) -> Unit, onAddPopImage: (Int) -> Unit, onEditPop: (Int, PopItem) -> Unit
 ) {
@@ -1024,10 +1052,22 @@ private fun SceneEditor(
         }
 
         if (part == 0) {
-            OutlinedButton(onClick = { onEffect(index) }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (img.effect.type == EffectType.NONE) "Add effect" else "Effect: ${img.effect.type.label}", maxLines = 1)
+            val effs = img.allEffects()
+            effs.forEachIndexed { k, fx ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("✨ ${fx.type.label}", modifier = Modifier.weight(1f), maxLines = 1, style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = { onEffect(index, k) }) { Text("Edit") }
+                    TextButton(onClick = {
+                        onConfirm("Remove \"${fx.type.label}\" from scene ${index + 1}? (you can Undo)") {
+                            vm.setSceneEffects(index, effs.filterIndexed { n, _ -> n != k })
+                        }
+                    }) { Text("Remove") }
+                }
             }
-            Text("The player above shows the picture with its effect.", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = { onEffect(index, effs.size) }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (effs.isEmpty()) "+ Add effect" else "+ Add another effect")
+            }
+            Text("You can put several effects on one scene. The player above shows them together.", style = MaterialTheme.typography.bodySmall)
         }
 
         if (part == 1) {

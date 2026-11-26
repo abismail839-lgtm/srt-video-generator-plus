@@ -114,7 +114,7 @@ data class EffectSettings(
     /** Size of the effect's own elements (used by the birds: flock size). 1 = normal. */
     val scale: Float = 1f,
     /** How many birds fly in the flock (birds effect only). */
-    val count: Int = 6
+    val count: Int = 8
 )
 
 /** Sound that plays under one scene (not a transition sound). */
@@ -221,8 +221,14 @@ data class ImageItem(
     val ambience: AmbienceSettings = AmbienceSettings(),
     /** An animated clip instead of a still picture (its own sound is not used). */
     val isVideo: Boolean = false,
-    val pops: List<PopItem> = emptyList()
+    val pops: List<PopItem> = emptyList(),
+    /** More effects on the same scene, besides [effect]. */
+    val extraEffects: List<EffectSettings> = emptyList()
 )
+
+/** Every effect that is really on this scene (main one first). */
+fun ImageItem.allEffects(): List<EffectSettings> =
+    (listOf(effect) + extraEffects).filter { it.type != EffectType.NONE }
 
 data class TransitionSettings(
     val enabled: Boolean = true,

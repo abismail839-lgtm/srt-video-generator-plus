@@ -79,3 +79,6 @@ New layout: top bar (undo, settings, Export), bottom tabs (Story, Scenes, Look, 
 
 ## 5.9
 Effect dialog: preview pinned on top, drag and pinch to place/size the effect, number of birds slider.
+
+## 6.0
+Player pinned on the Scenes tab, sideways scene strip with pinch zoom, clips play in the preview, several effects per scene, birds: whole flock in view and up to 40 birds.

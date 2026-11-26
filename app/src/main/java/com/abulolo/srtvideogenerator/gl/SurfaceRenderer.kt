@@ -178,7 +178,7 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
     /** Draws an overlay effect (EffectType ordinal 1..9) over the current frame. */
     fun drawOverlay(
         effect: Int, intensity: Float, timeSec: Float, alpha: Float,
-        rx: Float = 0.5f, ry: Float = 0.5f, rw: Float = 1f, rh: Float = 1f, scale: Float = 1f, count: Int = 6
+        rx: Float = 0.5f, ry: Float = 0.5f, rw: Float = 1f, rh: Float = 1f, scale: Float = 1f, count: Int = 8
     ) {
         // 10 = screen shake and 11 = zoom pulse are done by moving the picture, not by this shader
         if (effect <= 0 || effect == 10 || effect == 11 || effect > 27 || alpha <= 0.001f) return
@@ -670,26 +670,26 @@ class SurfaceRenderer(private val width: Int, private val height: Int) {
                     float h = 0.08 + 0.07 * I;
                     float a = max(step(uv.y, h), step(1.0 - h, uv.y));
                     over(acc, vec3(0.0), a);
-                } else if (uEffect == 27) {               // flying birds: one compact flock
+                } else if (uEffect == 27) {               // flying birds: one compact flock, always in view
                     float flock = 0.0;
-                    float ph = fract(t * 0.16);
-                    vec2 fc = vec2(-0.2 + 1.4 * ph, 0.38 + 0.05 * sin(t * 0.9));
-                    for (int bi = 0; bi < 20; bi++) {
+                    vec2 fc = vec2(0.58 + 0.2 * sin(t * 0.35), 0.36 + 0.06 * sin(t * 0.6));
+                    for (int bi = 0; bi < 40; bi++) {
                         float fi = float(bi);
+                        if (fi + 0.5 > uCount) break;
                         float rank = floor((fi + 1.0) / 2.0);
                         float side = mod(fi, 2.0) * 2.0 - 1.0;
-                        vec2 off = vec2(-rank * 0.07, side * rank * 0.045) * uScale;
+                        vec2 off = vec2(-rank * 0.04, side * rank * 0.028) * uScale;
                         off += vec2(0.012 * sin(t * 1.7 + fi * 2.3), 0.015 * sin(t * 2.1 + fi * 1.3)) * uScale;
                         vec2 pos = fc + off;
                         float sz = (0.04 + 0.012 * hash(vec2(fi, 1.9))) * uScale;
                         vec2 bp = (uv - pos) * vec2(uAspect, 1.0) / sz;
+                        if (abs(bp.x) > 1.3 || abs(bp.y) > 1.2) continue;
                         float flap = sin(t * (8.0 + 2.0 * hash(vec2(fi, 3.7))) + fi * 1.7) * 0.5;
                         float yw = flap * abs(bp.x);
                         float th = 0.16 * (1.0 - abs(bp.x) * 0.8);
                         float m = (1.0 - smoothstep(th * 0.5, max(th, 0.02), abs(bp.y - yw))) * step(abs(bp.x), 1.2);
                         m = max(m, 1.0 - smoothstep(0.1, 0.2, length(bp * vec2(1.0, 2.0))));
-                        float show = step(fi + 0.5, uCount);
-                        flock = max(flock, m * show);
+                        flock = max(flock, m);
                     }
                     over(acc, vec3(0.04, 0.04, 0.05), flock * 0.9);
                 }

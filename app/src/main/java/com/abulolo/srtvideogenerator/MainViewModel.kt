@@ -217,7 +217,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return fresh.map { n ->
             val o = byUri[n.uri.toString()]
             if (o == null) n else n.copy(
-                transition = o.transition, sfx = o.sfx, effect = o.effect, ambience = o.ambience
+                transition = o.transition, sfx = o.sfx, effect = o.effect, extraEffects = o.extraEffects, ambience = o.ambience
             )
         }
     }
@@ -519,6 +519,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
     }
 
+    /** Sets all effects of one scene (the first becomes the main one, the rest are extras). */
+    fun setSceneEffects(index: Int, effects: List<EffectSettings>) {
+        pushUndo()
+        val l = effects.filter { it.type != EffectType.NONE }
+        _state.update { s ->
+            s.copy(images = s.images.mapIndexed { i, im ->
+                if (i == index) im.copy(effect = l.firstOrNull() ?: EffectSettings(), extraEffects = l.drop(1)) else im
+            })
+        }
+    }
+
     fun setImageEffect(index: Int, effect: EffectSettings) {
         pushUndo()
         _state.update { s -> s.copy(images = s.images.mapIndexed { i, im -> if (i == index) im.copy(effect = effect) else im }) }
@@ -528,7 +539,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun applyEffectToAll(effect: EffectSettings, onlyEmpty: Boolean) {
         pushUndo()
         _state.update { s ->
-            s.copy(images = s.images.map { if (onlyEmpty && it.effect.type != EffectType.NONE) it else it.copy(effect = effect) })
+            s.copy(images = s.images.map { if (onlyEmpty && it.allEffects().isNotEmpty()) it else it.copy(effect = effect, extraEffects = emptyList()) })
         }
     }
 
@@ -575,7 +586,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     var n = im
                     if (CopyPart.TRANSITION in parts) n = n.copy(transition = src.transition)
                     if (CopyPart.SOUND in parts) n = n.copy(sfx = src.sfx)
-                    if (CopyPart.EFFECT in parts) n = n.copy(effect = src.effect)
+                    if (CopyPart.EFFECT in parts) n = n.copy(effect = src.effect, extraEffects = src.extraEffects)
                     if (CopyPart.SCENE_SOUND in parts) n = n.copy(ambience = src.ambience)
                     if (CopyPart.POPS in parts) n = n.copy(pops = src.pops)
                     n
