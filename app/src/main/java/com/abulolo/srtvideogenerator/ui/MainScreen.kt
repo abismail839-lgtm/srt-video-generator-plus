@@ -9,6 +9,8 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.runtime.LaunchedEffect
@@ -478,10 +480,10 @@ fun SrtVideoGeneratorScreen(vm: MainViewModel) {
         }
 
         }
-        androidx.compose.material3.NavigationBar {
+        NavigationBar {
             val tabs = listOf("🖼" to "Story", "🎞" to "Scenes", "🎨" to "Look", "🔊" to "Audio", "📤" to "Export")
             tabs.forEachIndexed { i, (icon, label) ->
-                androidx.compose.material3.NavigationBarItem(
+                NavigationBarItem(
                     selected = tab == i, onClick = { tab = i },
                     icon = { Text(icon) }, label = { Text(label, maxLines = 1) }
                 )
